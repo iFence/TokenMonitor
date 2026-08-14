@@ -8,7 +8,8 @@
 
 - **多工具支持**：通过 `providers/` 下的适配器读取各工具的本地数据目录
   - `claude`：`~/.claude/projects/**/*.jsonl`（已实现）
-  - `codex` / `gemini` / `qwen` / `opencode` / `qoder`：待实现（桩）
+  - `codex`：`~/.codex/sessions/**/*.jsonl` 的 `token_count` 事件（已实现）
+  - `gemini` / `qwen` / `opencode` / `qoder`：待实现（桩）
 - **SQLite 持久化**：用量记录（含 fingerprint 去重）、项目、配额、设置
 - **采集管线**：`scanner`（扫描解析）、`watcher`（文件监听）、`scheduler`（定时重扫）
 - **核心领域层**：用量归一化、成本计价、配额追踪、多维度聚合

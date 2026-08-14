@@ -9,7 +9,6 @@ use gpui::{
 use gpui_component::v_flex;
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
-use crate::core::aggregation;
 use crate::core::model::Provider;
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
@@ -107,7 +106,11 @@ impl RTokenApp {
                     records: summary.records,
                     at: Utc::now(),
                 };
-                self.refresh_view(cx);
+                // Unchanged scans (fingerprint matched) have no new data; skip
+                // the re-query + re-render so idle polls stay near-free.
+                if !summary.unchanged {
+                    self.refresh_view(cx);
+                }
             }
             CollectorEvent::ScanFailed { provider, error } => {
                 self.state.last_error = Some(format!("{}: {error}", provider.display_name()));
@@ -121,6 +124,10 @@ impl RTokenApp {
     }
 
     /// Recompute the aggregate view state from persisted usage records.
+    ///
+    /// Aggregation runs inside SQLite (`GROUP BY`), so only a handful of
+    /// aggregate rows are materialized per query instead of loading the whole
+    /// window's records into Rust objects.
     fn refresh_view(&mut self, _cx: &mut Context<Self>) {
         let db = self.collector.db();
         let conn = match db.lock() {
@@ -129,14 +136,27 @@ impl RTokenApp {
         };
         let repo = UsageRepo::new(&conn);
         let window = self.state.time_tab.window(Utc::now());
-        match repo.query_by_window(&window) {
-            Ok(all) => {
-                self.state.summary = Some(aggregation::total(&all));
-                self.state.by_provider = aggregation::by_provider(&all);
-                self.state.by_provider_model = aggregation::by_provider_model(&all);
-                self.state.by_project = aggregation::by_project(&all);
-                self.state.by_day = aggregation::by_day(&all);
+        match repo.aggregate_window(&window) {
+            Ok(s) => self.state.summary = Some(s),
+            Err(e) => {
+                self.state.last_error = Some(format!("query failed: {e}"));
+                return;
             }
+        }
+        match repo.aggregate_by_provider(&window) {
+            Ok(v) => self.state.by_provider = v,
+            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        }
+        match repo.aggregate_by_provider_model(&window) {
+            Ok(m) => self.state.by_provider_model = m,
+            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        }
+        match repo.aggregate_by_project(&window) {
+            Ok(v) => self.state.by_project = v,
+            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        }
+        match repo.aggregate_by_day(&window) {
+            Ok(v) => self.state.by_day = v,
             Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
         }
     }

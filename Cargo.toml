@@ -26,6 +26,9 @@ dirs = "6"
 notify = "7"
 walkdir = "2"
 async-channel = "2.5"
+# Returns freed memory to the OS on Windows; keeps RSS from parking at the
+# allocator's high-water mark after scans / view refreshes.
+mimalloc = "0.1"
 
 # GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
 # 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。

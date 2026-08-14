@@ -4,13 +4,43 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
-use super::source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
+use super::source::{
+    dir_fingerprint, fingerprint, ProviderConfig, ProviderError, ProviderSource, ScanOutput,
+};
+
+/// Minimal view of a Claude Code JSONL line. Only the fields we aggregate are
+/// named; everything else — notably the huge `message.content` array holding
+/// full tool results and file contents — is skipped by serde without being
+/// allocated.
+#[derive(Deserialize)]
+struct ClaudeLine {
+    #[serde(rename = "type")]
+    kind: Option<Value>,
+    timestamp: Option<String>,
+    message: Option<Message>,
+}
+
+#[derive(Deserialize)]
+struct Message {
+    model: Option<Value>,
+    usage: Option<UsageLine>,
+}
+
+/// Only the token counters we aggregate; the rest of `usage.*` is skipped.
+#[derive(Deserialize)]
+struct UsageLine {
+    input_tokens: Option<Value>,
+    output_tokens: Option<Value>,
+    cache_creation_input_tokens: Option<Value>,
+    cache_read_input_tokens: Option<Value>,
+}
 
 pub struct ClaudeSource {
     config: ProviderConfig,
@@ -63,28 +93,30 @@ impl ClaudeSource {
         if line.trim().is_empty() {
             return None;
         }
-        let value: Value = serde_json::from_str(line).ok()?;
-        if value.get("type")?.as_str()? != "assistant" {
+        let value: ClaudeLine = serde_json::from_str(line).ok()?;
+        if value.kind.as_ref().and_then(Value::as_str)? != "assistant" {
             return None;
         }
-        let usage = value.pointer("/message/usage")?;
-        if usage.is_null() {
-            return None;
-        }
+        let message = value.message.as_ref()?;
+        let usage = message.usage.as_ref()?;
         let input_tokens = usage
-            .get("input_tokens")
+            .input_tokens
+            .as_ref()
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let output_tokens = usage
-            .get("output_tokens")
+            .output_tokens
+            .as_ref()
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let cache_write_tokens = usage
-            .get("cache_creation_input_tokens")
+            .cache_creation_input_tokens
+            .as_ref()
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let cache_read_tokens = usage
-            .get("cache_read_input_tokens")
+            .cache_read_input_tokens
+            .as_ref()
             .and_then(Value::as_u64)
             .unwrap_or(0);
         if input_tokens + output_tokens + cache_write_tokens + cache_read_tokens == 0 {
@@ -92,13 +124,14 @@ impl ClaudeSource {
         }
 
         let started_at = value
-            .get("timestamp")
-            .and_then(Value::as_str)
+            .timestamp
+            .as_deref()
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
-        let model = value
-            .pointer("/message/model")
+        let model = message
+            .model
+            .as_ref()
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
@@ -188,11 +221,12 @@ impl ProviderSource for ClaudeSource {
             }
         }
 
-        out.fingerprint = format!("{}:{max_mtime}:{total_bytes}", out.found_files);
+        out.fingerprint = fingerprint(out.found_files, max_mtime, total_bytes);
         Ok(out)
     }
 
     fn scan_fingerprint(&self) -> Result<String, ProviderError> {
-        Ok(self.scan()?.fingerprint)
+        let dir = self.data_dir()?;
+        dir_fingerprint(&dir, self.config.max_depth, self.config.max_file_size)
     }
 }

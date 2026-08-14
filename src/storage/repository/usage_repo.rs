@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -147,6 +149,103 @@ impl<'a> UsageRepo<'a> {
             .map_err(Into::into)
     }
 
+    /// Per-provider aggregates over a window, sorted by cost descending.
+    pub fn aggregate_by_provider(&self, w: &TimeWindow) -> Result<Vec<(Provider, SumStats)>> {
+        self.aggregate_grouped("provider", w)?
+            .into_iter()
+            .map(|(id, s)| {
+                let provider = Provider::from_id(&id).ok_or_else(|| sqlite_error(&id))?;
+                Ok((provider, s))
+            })
+            .collect()
+    }
+
+    /// Per-provider per-model aggregates over a window; each provider's models
+    /// sorted by cost descending.
+    pub fn aggregate_by_provider_model(
+        &self,
+        w: &TimeWindow,
+    ) -> Result<BTreeMap<Provider, Vec<(String, SumStats)>>> {
+        let sql = format!(
+            "SELECT provider, model,
+                COUNT(*),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_write_tokens), 0),
+                COALESCE(SUM(cost_micros), 0)
+             FROM usage_records
+             WHERE started_at >= ?1 AND started_at < ?2
+             GROUP BY provider, model"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![w.start.to_rfc3339(), w.end.to_rfc3339()],
+            |row| {
+                let provider_id: String = row.get(0)?;
+                let model: String = row.get(1)?;
+                let stats = sum_stats_from_row(row)?;
+                Ok((provider_id, model, stats))
+            },
+        )?;
+        let mut map: BTreeMap<Provider, Vec<(String, SumStats)>> = BTreeMap::new();
+        for r in rows {
+            let (provider_id, model, stats) = r?;
+            let provider = Provider::from_id(&provider_id)
+                .ok_or_else(|| sqlite_error(&provider_id))?;
+            map.entry(provider).or_default().push((model, stats));
+        }
+        for models in map.values_mut() {
+            models.sort_by(|a, b| b.1.cost_micros.cmp(&a.1.cost_micros));
+        }
+        Ok(map)
+    }
+
+    /// Per-project aggregates over a window, sorted by cost descending.
+    pub fn aggregate_by_project(&self, w: &TimeWindow) -> Result<Vec<(String, SumStats)>> {
+        self.aggregate_grouped("project", w)
+    }
+
+    /// Per-calendar-day aggregates (East-8 wall-clock day, `YYYY-MM-DD`),
+    /// sorted by cost descending. `date(started_at, '+8 hours')` reproduces
+    /// `core::aggregation::window::day_key`.
+    pub fn aggregate_by_day(&self, w: &TimeWindow) -> Result<Vec<(String, SumStats)>> {
+        self.aggregate_grouped("date(started_at, '+8 hours')", w)
+    }
+
+    /// Shared `GROUP BY <group_sql>` aggregate; returns keys + stats sorted by
+    /// cost descending. Column 0 is the group key, columns 1..=6 are SumStats.
+    fn aggregate_grouped(
+        &self,
+        group_sql: &str,
+        w: &TimeWindow,
+    ) -> Result<Vec<(String, SumStats)>> {
+        let sql = format!(
+            "SELECT {group_sql},
+                COUNT(*),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(cache_read_tokens), 0),
+                COALESCE(SUM(cache_write_tokens), 0),
+                COALESCE(SUM(cost_micros), 0)
+             FROM usage_records
+             WHERE started_at >= ?1 AND started_at < ?2
+             GROUP BY {group_sql}"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![w.start.to_rfc3339(), w.end.to_rfc3339()],
+            |row| {
+                let key: String = row.get(0)?;
+                let stats = sum_stats_from_row(row)?;
+                Ok((key, stats))
+            },
+        )?;
+        let mut v: Vec<_> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        v.sort_by(|a, b| b.1.cost_micros.cmp(&a.1.cost_micros));
+        Ok(v)
+    }
+
     pub fn distinct_projects(&self) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
@@ -169,8 +268,20 @@ impl<'a> UsageRepo<'a> {
     }
 }
 
-fn record_from_row(row: &Row<'_>) -> rusqlite::Result<UsageRecord> {
-    let provider_id: String = row.get("provider")?;
+/// Read a SumStats from a GROUP BY row whose columns 1..=6 hold the six stats
+/// (column 0 is the group key).
+fn sum_stats_from_row(row: &Row<'_>) -> rusqlite::Result<SumStats> {
+    Ok(SumStats {
+        records: row.get::<_, i64>(1)? as u64,
+        input_tokens: row.get::<_, i64>(2)? as u64,
+        output_tokens: row.get::<_, i64>(3)? as u64,
+        cache_read_tokens: row.get::<_, i64>(4)? as u64,
+        cache_write_tokens: row.get::<_, i64>(5)? as u64,
+        cost_micros: row.get::<_, i64>(6)? as u64,
+    })
+}
+
+fn record_from_row(row: &Row<'_>) -> rusqlite::Result<UsageRecord> {    let provider_id: String = row.get("provider")?;
     let provider = Provider::from_id(&provider_id).ok_or_else(|| sqlite_error(&provider_id))?;
     let started_at: String = row.get("started_at")?;
     let started_at = parse_rfc3339(&started_at)?;
