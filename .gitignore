@@ -1,0 +1,16 @@
+/target/
+/.idea/
+/.vscode/
+*.pdb
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+.claude
+.codegraph

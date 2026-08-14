@@ -1,0 +1,47 @@
+[package]
+name = "rtoken"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+license = "MIT"
+resolver = "2"
+description = "Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, Qoder)"
+
+[lib]
+name = "rtoken"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rtoken"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+dirs = "6"
+notify = "7"
+walkdir = "2"
+async-channel = "2.5"
+
+# GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
+# 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
