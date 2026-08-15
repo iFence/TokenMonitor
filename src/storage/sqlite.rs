@@ -64,6 +64,19 @@ pub fn open(db_path: &std::path::Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Open a read-only connection for UI aggregation.
+///
+/// Does NOT run `init_schema` (which would briefly take a write lock and
+/// contend with the scan writer). WAL journal mode is persisted in the DB file,
+/// so a reader opened here sees a consistent snapshot without ever blocking the
+/// writer.
+pub fn open_read(db_path: &std::path::Path) -> Result<Connection> {
+    let conn = Connection::open(db_path).context("open sqlite database (read)")?;
+    conn.pragma_update(None, "query_only", "ON")?;
+    conn.pragma_update(None, "busy_timeout", 5000)?;
+    Ok(conn)
+}
+
 /// Run the schema DDL. Safe to call repeatedly.
 pub fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA_SQL).context("init schema")

@@ -8,8 +8,8 @@
 1 ICON "rtoken.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,2,0,0
+PRODUCTVERSION 0,2,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -17,9 +17,9 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "rToken"
       VALUE "FileDescription", "rToken - AI coding tool token usage tracker"
-      VALUE "FileVersion", "0.1.0"
+      VALUE "FileVersion", "0.2.0"
       VALUE "ProductName", "rToken"
-      VALUE "ProductVersion", "0.1.0"
+      VALUE "ProductVersion", "0.2.0"
     END
   END
   BLOCK "VarFileInfo"

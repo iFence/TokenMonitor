@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::core::model::Provider;
+use crate::core::usage::UsageRecord;
 
 use super::source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 
@@ -21,17 +22,17 @@ impl ProviderSource for QoderSource {
         Provider::Qoder
     }
 
-    fn data_dir(&self) -> Result<PathBuf, ProviderError> {
+    fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
         if let Some(dir) = &self.config.data_dir_override {
-            return Ok(dir.clone());
+            return Ok(vec![dir.clone()]);
         }
         // TODO: locate Qoder data dir
         let home = crate::platform::home_dir()
             .map_err(|_| ProviderError::DataDirNotFound(Provider::Qoder))?;
-        Ok(home.join(".qoder"))
+        Ok(vec![home.join(".qoder")])
     }
 
-    fn scan(&self) -> Result<ScanOutput, ProviderError> {
+    fn scan(&self, _emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
         // TODO: parse Qoder usage records
         Ok(ScanOutput::default())
     }

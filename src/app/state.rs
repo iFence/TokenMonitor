@@ -12,6 +12,7 @@ pub enum ActivePage {
     Dashboard,
     Project,
     Settings,
+    Charts,
 }
 
 /// Dashboard time-range tab (a UI concept; not persisted, decoupled from the
@@ -92,4 +93,115 @@ pub struct AppState {
     pub by_provider_model: BTreeMap<Provider, Vec<(String, SumStats)>>,
     pub by_project: Vec<(String, SumStats)>,
     pub by_day: Vec<(String, SumStats)>,
+    pub charts: ChartsState,
+}
+
+/// Charts page time range (a UI concept, not persisted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartRange {
+    #[default]
+    Last7,
+    Last30,
+    Last90,
+    ThisYear,
+}
+
+impl ChartRange {
+    pub const ALL: [ChartRange; 4] = [Self::Last7, Self::Last30, Self::Last90, Self::ThisYear];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Last7 => "近7天",
+            Self::Last30 => "近30天",
+            Self::Last90 => "近90天",
+            Self::ThisYear => "本年",
+        }
+    }
+
+    /// Window for this range, measured in East-8 calendar days.
+    pub fn window(self, now: DateTime<Utc>) -> TimeWindow {
+        match self {
+            Self::Last7 => TimeWindow::last_n_days(7, now),
+            Self::Last30 => TimeWindow::last_n_days(30, now),
+            Self::Last90 => TimeWindow::last_n_days(90, now),
+            Self::ThisYear => TimeWindow::current_year(now),
+        }
+    }
+}
+
+/// Metric shown on the charts page (mapped to `f64` at render time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartMetric {
+    #[default]
+    TotalTokens,
+    OutputTokens,
+    Cost,
+}
+
+impl ChartMetric {
+    pub const ALL: [ChartMetric; 3] = [Self::TotalTokens, Self::OutputTokens, Self::Cost];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::TotalTokens => "总Token",
+            Self::OutputTokens => "输出Token",
+            Self::Cost => "花费",
+        }
+    }
+}
+
+/// Chart rendering mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChartKind {
+    #[default]
+    Line,
+    Bar,
+}
+
+impl ChartKind {
+    pub const ALL: [ChartKind; 2] = [Self::Line, Self::Bar];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Line => "折线图",
+            Self::Bar => "柱状图",
+        }
+    }
+}
+
+/// Raw per-day series for the charts page. Kept as `SumStats` so metric/kind
+/// changes are render-time transforms rather than DB re-queries.
+#[derive(Debug, Clone, Default)]
+pub struct ChartsSnapshot {
+    /// Per-provider daily series, in `Provider::ALL` order.
+    pub provider_series: Vec<(Provider, Vec<(String, SumStats)>)>,
+    /// Per-model daily series for the selected provider.
+    pub model_series: BTreeMap<String, Vec<(String, SumStats)>>,
+}
+
+/// Charts page control + loaded data state.
+#[derive(Debug, Clone, Default)]
+pub struct ChartsState {
+    pub range: ChartRange,
+    pub metric: ChartMetric,
+    pub kind: ChartKind,
+    /// Provider shown in the per-model chart.
+    pub provider: Provider,
+    pub data: Option<ChartsSnapshot>,
+}
+
+/// A complete set of aggregate view data, computed on a background thread and
+/// applied to app state on the main thread. All fields are owned and `Send`.
+#[derive(Debug, Default)]
+pub struct ViewSnapshot {
+    /// Monotonic request sequence; stale results are dropped on apply.
+    pub seq: u64,
+    pub time_tab: TimeTab,
+    pub summary: Option<SumStats>,
+    pub by_provider: Vec<(Provider, SumStats)>,
+    pub by_provider_model: BTreeMap<Provider, Vec<(String, SumStats)>>,
+    pub by_project: Vec<(String, SumStats)>,
+    pub by_day: Vec<(String, SumStats)>,
+    pub charts: Option<ChartsSnapshot>,
+    pub error: Option<String>,
 }

@@ -23,10 +23,9 @@ pub fn render_topbar(
     let status_text = match &app.state.scan_status {
         ScanStatus::Idle => "尚未扫描".to_string(),
         ScanStatus::Scanning { .. } => "扫描中…".to_string(),
-        ScanStatus::Done { at, .. } => format!(
-            "更新 {}",
-            at.with_timezone(&east8()).format("%H:%M:%S")
-        ),
+        ScanStatus::Done { at, .. } => {
+            format!("更新 {}", at.with_timezone(&east8()).format("%H:%M:%S"))
+        }
         ScanStatus::Failed { .. } => "扫描失败".to_string(),
     };
 
@@ -82,6 +81,13 @@ pub fn render_topbar(
                 .child(nav_icon(
                     app,
                     cx,
+                    "nav-charts",
+                    IconName::ChartPie,
+                    ActivePage::Charts,
+                ))
+                .child(nav_icon(
+                    app,
+                    cx,
                     "nav-settings",
                     IconName::Settings,
                     ActivePage::Settings,
@@ -102,7 +108,6 @@ fn nav_icon(
         .icon(icon)
         .selected(app.state.active_page == page)
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.state.active_page = page;
-            cx.notify();
+            this.select_page(page, cx);
         }))
 }

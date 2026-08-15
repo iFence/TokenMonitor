@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::core::model::Provider;
+use crate::core::usage::UsageRecord;
 
 use super::source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 
@@ -21,17 +22,17 @@ impl ProviderSource for GeminiSource {
         Provider::Gemini
     }
 
-    fn data_dir(&self) -> Result<PathBuf, ProviderError> {
+    fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
         if let Some(dir) = &self.config.data_dir_override {
-            return Ok(dir.clone());
+            return Ok(vec![dir.clone()]);
         }
         // TODO: locate Gemini CLI data dir (e.g. ~/.gemini)
         let home = crate::platform::home_dir()
             .map_err(|_| ProviderError::DataDirNotFound(Provider::Gemini))?;
-        Ok(home.join(".gemini"))
+        Ok(vec![home.join(".gemini")])
     }
 
-    fn scan(&self) -> Result<ScanOutput, ProviderError> {
+    fn scan(&self, _emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
         // TODO: parse Gemini CLI usage records
         Ok(ScanOutput::default())
     }

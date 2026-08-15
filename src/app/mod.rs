@@ -6,7 +6,10 @@ pub mod state;
 
 pub use actions::Quit;
 pub use app::RTokenApp;
-pub use state::{ActivePage, AppState, ScanStatus, TimeTab};
+pub use state::{
+    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
+    ScanStatus, TimeTab, ViewSnapshot,
+};
 
 use gpui::{px, size, App, AppContext, Bounds, WindowBounds, WindowOptions};
 use gpui_component::Root;

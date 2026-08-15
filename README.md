@@ -1,6 +1,6 @@
 # rToken
 
-一个基于 **Rust + GPUI** 的 AI 编程工具 **Token 用量追踪**桌面应用。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、Qwen Code、OpenCode、Qoder）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
+一个基于 **Rust + GPUI** 的 AI 编程工具 **Token 用量追踪**桌面应用。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、CodeBuddy、OpenCode、Qoder）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
 
 > 灵感与聚合/展示形式参考 [tokei](https://github.com/cclank/tokei)（按类别分组、排序、带合计的汇总表）。
 
@@ -9,7 +9,8 @@
 - **多工具支持**：通过 `providers/` 下的适配器读取各工具的本地数据目录
   - `claude`：`~/.claude/projects/**/*.jsonl`（已实现）
   - `codex`：`~/.codex/sessions/**/*.jsonl` 的 `token_count` 事件（已实现）
-  - `gemini` / `qwen` / `opencode` / `qoder`：待实现（桩）
+  - `codebuddy`：`~/.codebuddy/projects/**/*.jsonl` 的 `message.usage`（已实现）
+  - `gemini` / `opencode` / `qoder`：待实现（桩）
 - **SQLite 持久化**：用量记录（含 fingerprint 去重）、项目、配额、设置
 - **采集管线**：`scanner`（扫描解析）、`watcher`（文件监听）、`scheduler`（定时重扫）
 - **核心领域层**：用量归一化、成本计价、配额追踪、多维度聚合

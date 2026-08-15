@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_channel::{unbounded, Receiver, Sender};
 use chrono::Utc;
 use gpui::{
     App, Context, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render,
@@ -9,12 +10,16 @@ use gpui::{
 use gpui_component::v_flex;
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
-use crate::core::model::Provider;
+use crate::core::model::{Provider, TimeWindow};
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
+use crate::storage::sqlite;
 use crate::ui;
 
-use super::state::{AppState, ScanStatus, TimeTab};
+use super::state::{
+    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus, TimeTab,
+    ViewSnapshot,
+};
 
 /// Periodic auto-rescan interval, matching tokei's 30-second refresh.
 const SCAN_INTERVAL: Duration = Duration::from_secs(30);
@@ -27,6 +32,9 @@ pub struct RTokenApp {
     pub weak_self: WeakEntity<RTokenApp>,
     /// Keeps the periodic auto-rescan thread alive for the app's lifetime.
     _scheduler: std::thread::JoinHandle<()>,
+    view_tx: Sender<ViewSnapshot>,
+    view_rx: Receiver<ViewSnapshot>,
+    view_seq: u64,
 }
 
 impl RTokenApp {
@@ -36,16 +44,20 @@ impl RTokenApp {
         let db_path = default_db_path().expect("resolve app data dir");
         let collector = Arc::new(Collector::open(&db_path).expect("open collector"));
         let scheduler = scheduler::start_scheduler(collector.clone(), SCAN_INTERVAL);
+        let (view_tx, view_rx) = unbounded();
         let mut app = RTokenApp {
             state: AppState::default(),
             collector,
             focus_handle,
             weak_self: cx.weak_entity(),
             _scheduler: scheduler,
+            view_tx,
+            view_rx,
+            view_seq: 0,
         };
         app.spawn_event_loop(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
-        app.refresh_view(cx);
+        app.refresh_view(cx); // async: returns immediately, fills state in background
         app
     }
 
@@ -72,6 +84,39 @@ impl RTokenApp {
         cx.notify();
     }
 
+    /// Switch the active page; entering the charts page triggers a load.
+    pub fn select_page(&mut self, page: ActivePage, cx: &mut Context<Self>) {
+        self.state.active_page = page;
+        if page == ActivePage::Charts {
+            self.refresh_view(cx);
+        }
+        cx.notify();
+    }
+
+    /// Charts control handlers. Range/provider changes re-query; metric/kind
+    /// changes are pure render-time transforms.
+    pub fn select_chart_range(&mut self, range: ChartRange, cx: &mut Context<Self>) {
+        self.state.charts.range = range;
+        self.refresh_view(cx);
+        cx.notify();
+    }
+
+    pub fn select_chart_metric(&mut self, metric: ChartMetric, cx: &mut Context<Self>) {
+        self.state.charts.metric = metric;
+        cx.notify();
+    }
+
+    pub fn select_chart_kind(&mut self, kind: ChartKind, cx: &mut Context<Self>) {
+        self.state.charts.kind = kind;
+        cx.notify();
+    }
+
+    pub fn select_chart_provider(&mut self, provider: Provider, cx: &mut Context<Self>) {
+        self.state.charts.provider = provider;
+        self.refresh_view(cx);
+        cx.notify();
+    }
+
     /// Expand/collapse a provider card's per-model breakdown.
     pub fn toggle_provider_expanded(&mut self, provider: Provider, cx: &mut Context<Self>) {
         self.state.expanded_provider = if self.state.expanded_provider == Some(provider) {
@@ -88,6 +133,14 @@ impl RTokenApp {
         cx.spawn(async move |this, cx| {
             while let Ok(event) = receiver.recv().await {
                 let _ = this.update(cx, |app, cx| app.handle_collector_event(event, cx));
+            }
+        })
+        .detach();
+
+        let view_rx = self.view_rx.clone();
+        cx.spawn(async move |this, cx| {
+            while let Ok(snapshot) = view_rx.recv().await {
+                let _ = this.update(cx, |app, cx| app.apply_snapshot(snapshot, cx));
             }
         })
         .detach();
@@ -123,43 +176,118 @@ impl RTokenApp {
         cx.notify();
     }
 
-    /// Recompute the aggregate view state from persisted usage records.
-    ///
-    /// Aggregation runs inside SQLite (`GROUP BY`), so only a handful of
-    /// aggregate rows are materialized per query instead of loading the whole
-    /// window's records into Rust objects.
+    /// Kick off a background aggregation. Runs on a dedicated read-only SQLite
+    /// connection (WAL, so it never blocks the scan writer), then posts the
+    /// result back through `view_tx` for the event loop to apply.
     fn refresh_view(&mut self, _cx: &mut Context<Self>) {
-        let db = self.collector.db();
-        let conn = match db.lock() {
-            Ok(conn) => conn,
-            Err(_) => return,
+        let seq = self.view_seq.wrapping_add(1);
+        self.view_seq = seq;
+
+        let db_path = self.collector.db_path().to_path_buf();
+        let now = Utc::now();
+        let time_tab = self.state.time_tab;
+        let window = time_tab.window(now);
+        let charts = if self.state.active_page == ActivePage::Charts {
+            Some((self.state.charts.range.window(now), self.state.charts.provider))
+        } else {
+            None
         };
-        let repo = UsageRepo::new(&conn);
-        let window = self.state.time_tab.window(Utc::now());
-        match repo.aggregate_window(&window) {
-            Ok(s) => self.state.summary = Some(s),
-            Err(e) => {
-                self.state.last_error = Some(format!("query failed: {e}"));
-                return;
-            }
+        let tx = self.view_tx.clone();
+
+        std::thread::Builder::new()
+            .name("rtoken-aggregate".into())
+            .spawn(move || {
+                let snapshot = compute_view_snapshot(seq, time_tab, &db_path, window, charts);
+                let _ = tx.send_blocking(snapshot);
+            })
+            .expect("spawn aggregate thread");
+    }
+
+    fn apply_snapshot(&mut self, snap: ViewSnapshot, cx: &mut Context<Self>) {
+        if snap.seq != self.view_seq {
+            return; // stale: a newer request superseded this one
         }
-        match repo.aggregate_by_provider(&window) {
-            Ok(v) => self.state.by_provider = v,
-            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        self.state.summary = snap.summary;
+        self.state.by_provider = snap.by_provider;
+        self.state.by_provider_model = snap.by_provider_model;
+        self.state.by_project = snap.by_project;
+        self.state.by_day = snap.by_day;
+        if let Some(charts) = snap.charts {
+            self.state.charts.data = Some(charts);
         }
-        match repo.aggregate_by_provider_model(&window) {
-            Ok(m) => self.state.by_provider_model = m,
-            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        if let Some(error) = snap.error {
+            self.state.last_error = Some(error);
         }
-        match repo.aggregate_by_project(&window) {
-            Ok(v) => self.state.by_project = v,
-            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+        cx.notify();
+    }
+}
+
+/// Compute the aggregate view snapshot on the calling (background) thread.
+fn compute_view_snapshot(
+    seq: u64,
+    time_tab: TimeTab,
+    db_path: &std::path::Path,
+    window: TimeWindow,
+    charts: Option<(TimeWindow, Provider)>,
+) -> ViewSnapshot {
+    let mut snap = ViewSnapshot {
+        seq,
+        time_tab,
+        ..ViewSnapshot::default()
+    };
+    let conn = match sqlite::open_read(db_path) {
+        Ok(conn) => conn,
+        Err(e) => {
+            snap.error = Some(format!("open read db failed: {e}"));
+            return snap;
         }
-        match repo.aggregate_by_day(&window) {
-            Ok(v) => self.state.by_day = v,
-            Err(e) => self.state.last_error = Some(format!("query failed: {e}")),
+    };
+    let repo = UsageRepo::new(&conn);
+
+    // Keep the old partial-success semantics: a failing query sets the error
+    // but does not discard the other aggregates.
+    match repo.aggregate_window(&window) {
+        Ok(s) => snap.summary = Some(s),
+        Err(e) => snap.error = Some(format!("query failed: {e}")),
+    }
+    match repo.aggregate_by_provider(&window) {
+        Ok(v) => snap.by_provider = v,
+        Err(e) => snap.error = Some(format!("query failed: {e}")),
+    }
+    match repo.aggregate_by_provider_model(&window) {
+        Ok(m) => snap.by_provider_model = m,
+        Err(e) => snap.error = Some(format!("query failed: {e}")),
+    }
+    match repo.aggregate_by_project(&window) {
+        Ok(v) => snap.by_project = v,
+        Err(e) => snap.error = Some(format!("query failed: {e}")),
+    }
+    match repo.aggregate_by_day(&window) {
+        Ok(v) => snap.by_day = v,
+        Err(e) => snap.error = Some(format!("query failed: {e}")),
+    }
+    if let Some((chart_window, provider)) = charts {
+        snap.charts = Some(compute_chart_snapshot(&repo, chart_window, provider));
+    }
+    snap
+}
+
+/// Compute the charts page's raw per-day series.
+fn compute_chart_snapshot(
+    repo: &UsageRepo<'_>,
+    window: TimeWindow,
+    provider: Provider,
+) -> ChartsSnapshot {
+    let mut snap = ChartsSnapshot::default();
+    for p in Provider::ALL {
+        if let Ok(series) = repo.daily_series_by_provider(p, &window) {
+            snap.provider_series.push((p, series));
         }
     }
+    if let Ok(models) = repo.daily_series_by_provider_model(provider, &window) {
+        snap.model_series = models;
+    }
+    snap
 }
 
 impl Focusable for RTokenApp {

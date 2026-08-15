@@ -1,11 +1,12 @@
 //! Provider data-source adapters: one per AI coding tool.
 
 pub mod claude;
+pub mod codebuddy;
 pub mod codex;
 pub mod gemini;
 pub mod opencode;
 pub mod qoder;
-pub mod qwen;
+mod roots;
 mod source;
 
 pub use source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
@@ -40,7 +41,9 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             Provider::Gemini => {
                 Box::new(gemini::GeminiSource::new(c.clone())) as Box<dyn ProviderSource>
             }
-            Provider::Qwen => Box::new(qwen::QwenSource::new(c.clone())) as Box<dyn ProviderSource>,
+            Provider::Codebuddy => {
+                Box::new(codebuddy::CodebuddySource::new(c.clone())) as Box<dyn ProviderSource>
+            }
             Provider::OpenCode => {
                 Box::new(opencode::OpenCodeSource::new(c.clone())) as Box<dyn ProviderSource>
             }

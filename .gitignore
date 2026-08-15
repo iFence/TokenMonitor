@@ -12,5 +12,8 @@ Thumbs.db
 *.db-shm
 *.sqlite3
 
+/dist/
+memmap_floor.txt
+
 .claude
 .codegraph

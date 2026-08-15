@@ -10,7 +10,7 @@ pub enum Provider {
     Claude,
     Codex,
     Gemini,
-    Qwen,
+    Codebuddy,
     OpenCode,
     Qoder,
 }
@@ -26,7 +26,7 @@ impl Provider {
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
-        Provider::Qwen,
+        Provider::Codebuddy,
         Provider::OpenCode,
         Provider::Qoder,
     ];
@@ -37,7 +37,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Gemini => "gemini",
-            Provider::Qwen => "qwen",
+            Provider::Codebuddy => "codebuddy",
             Provider::OpenCode => "opencode",
             Provider::Qoder => "qoder",
         }
@@ -48,7 +48,7 @@ impl Provider {
             Provider::Claude => "Claude Code",
             Provider::Codex => "Codex CLI",
             Provider::Gemini => "Gemini CLI",
-            Provider::Qwen => "Qwen Code",
+            Provider::Codebuddy => "CodeBuddy",
             Provider::OpenCode => "OpenCode",
             Provider::Qoder => "Qoder",
         }

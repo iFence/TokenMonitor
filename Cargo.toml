@@ -1,18 +1,22 @@
 [package]
 name = "rtoken"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
 resolver = "2"
-description = "Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, Qoder)"
+description = "Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, CodeBuddy, OpenCode, Qoder)"
 
 [lib]
 name = "rtoken"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rtoken"
+# NOTE: must not be named "rtoken.exe" — the Intel GPU driver applies a
+# per-application profile to exactly that name which makes D3D11CreateDevice
+# allocate ~150MB extra host memory (measured: same exe renamed runs at
+# ~115MB vs ~265MB floor). See memory notes before renaming back.
+name = "rtoken-app"
 path = "src/main.rs"
 
 [dependencies]
@@ -20,7 +24,7 @@ anyhow = "1.0"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock", "std"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 dirs = "6"
 notify = "7"
@@ -48,3 +52,10 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

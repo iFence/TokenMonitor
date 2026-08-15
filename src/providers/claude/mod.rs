@@ -1,18 +1,19 @@
 //! Claude Code data source: parses `~/.claude/projects/**/*.jsonl`.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use walkdir::WalkDir;
 
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
+use super::roots::discover_roots;
 use super::source::{
-    dir_fingerprint, fingerprint, ProviderConfig, ProviderError, ProviderSource, ScanOutput,
+    for_each_line, roots_fingerprint, scan_roots, ProviderConfig, ProviderError, ProviderSource,
+    ScanOutput, ScanRoot,
 };
 
 /// Minimal view of a Claude Code JSONL line. Only the fields we aggregate are
@@ -44,25 +45,47 @@ struct UsageLine {
 
 pub struct ClaudeSource {
     config: ProviderConfig,
+    /// Discovered scan roots, computed lazily on the first scan (background
+    /// thread) so WSL discovery never blocks UI startup.
+    roots: OnceLock<Vec<ScanRoot>>,
 }
 
 impl ClaudeSource {
     pub fn new(config: ProviderConfig) -> Self {
-        ClaudeSource { config }
-    }
-
-    fn base_dir(&self) -> Result<PathBuf, ProviderError> {
-        if let Some(dir) = &self.config.data_dir_override {
-            return Ok(dir.clone());
+        ClaudeSource {
+            config,
+            roots: OnceLock::new(),
         }
-        let home = crate::platform::home_dir()
-            .map_err(|_| ProviderError::DataDirNotFound(Provider::Claude))?;
-        Ok(home.join(".claude").join("projects"))
     }
 
-    fn parse_file(&self, path: &Path, rel: &Path) -> Result<Vec<UsageRecord>, String> {
-        let content = fs::read(path).map_err(|e| format!("read {:?}: {e}", path))?;
-        let text = String::from_utf8_lossy(&content);
+    fn roots(&self) -> &[ScanRoot] {
+        self.roots.get_or_init(|| {
+            if let Some(dir) = &self.config.data_dir_override {
+                vec![ScanRoot {
+                    dir: dir.clone(),
+                    label: None,
+                }]
+            } else {
+                discover_roots(&[".claude", "projects"])
+            }
+        })
+    }
+
+    fn existing_roots(&self) -> Vec<ScanRoot> {
+        self.roots()
+            .iter()
+            .filter(|r| r.dir.is_dir())
+            .cloned()
+            .collect()
+    }
+
+    /// Stream the file line-by-line, emitting one record per usage-bearing
+    /// line without holding the raw text or the full record set in memory.
+    fn parse_file(
+        path: &Path,
+        rel: &Path,
+        emit: &mut dyn FnMut(UsageRecord),
+    ) -> Result<(), String> {
         // TODO: decode the Claude Code project slug (path with '/' and ':' -> '-')
         let project = rel
             .parent()
@@ -74,13 +97,11 @@ impl ClaudeSource {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
 
-        let mut records = Vec::new();
-        for (line_idx, line) in text.lines().enumerate() {
+        for_each_line(path, |line, line_idx| {
             if let Some(r) = Self::parse_line(line, &project, &session_id, rel, line_idx) {
-                records.push(r);
+                emit(r);
             }
-        }
-        Ok(records)
+        })
     }
 
     fn parse_line(
@@ -160,73 +181,44 @@ impl ProviderSource for ClaudeSource {
         Provider::Claude
     }
 
-    fn data_dir(&self) -> Result<PathBuf, ProviderError> {
-        let dir = self.base_dir()?;
-        if dir.is_dir() {
-            Ok(dir)
-        } else {
+    fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
+        let dirs: Vec<PathBuf> = self
+            .existing_roots()
+            .into_iter()
+            .map(|r| r.dir)
+            .collect();
+        if dirs.is_empty() {
             Err(ProviderError::DataDirNotFound(Provider::Claude))
+        } else {
+            Ok(dirs)
         }
     }
 
-    fn scan(&self) -> Result<ScanOutput, ProviderError> {
-        let dir = self.data_dir()?;
-        let mut out = ScanOutput::default();
-        let mut max_mtime = 0i64;
-        let mut total_bytes = 0u64;
-
-        for entry in WalkDir::new(&dir)
-            .max_depth(self.config.max_depth)
-            .follow_links(false)
-        {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    out.errors.push(format!("walk error: {e}"));
-                    continue;
-                }
-            };
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let is_jsonl = path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("jsonl"));
-            if !is_jsonl {
-                continue;
-            }
-            let meta = match fs::metadata(path) {
-                Ok(m) => m,
-                Err(e) => {
-                    out.errors.push(format!("metadata {:?}: {e}", path));
-                    continue;
-                }
-            };
-            if meta.len() > self.config.max_file_size {
-                out.errors.push(format!("skip oversized {:?}", path));
-                continue;
-            }
-            out.found_files += 1;
-            total_bytes += meta.len();
-            if let Ok(modified) = meta.modified() {
-                if let Ok(unix) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    max_mtime = max_mtime.max(unix.as_secs() as i64);
-                }
-            }
-            let rel = path.strip_prefix(&dir).unwrap_or(path);
-            match self.parse_file(path, rel) {
-                Ok(records) => out.records.extend(records),
-                Err(e) => out.errors.push(e),
-            }
+    fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Claude));
         }
-
-        out.fingerprint = fingerprint(out.found_files, max_mtime, total_bytes);
-        Ok(out)
+        let mut errors = Vec::new();
+        let (found_files, fingerprint) = scan_roots(
+            &roots,
+            &self.config,
+            emit,
+            &mut errors,
+            &mut |path, rel, file_emit| Self::parse_file(path, rel, file_emit),
+        );
+        Ok(ScanOutput {
+            found_files,
+            fingerprint,
+            errors,
+        })
     }
 
     fn scan_fingerprint(&self) -> Result<String, ProviderError> {
-        let dir = self.data_dir()?;
-        dir_fingerprint(&dir, self.config.max_depth, self.config.max_file_size)
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Claude));
+        }
+        roots_fingerprint(&roots, self.config.max_depth, self.config.max_file_size)
     }
 }

@@ -1,11 +1,17 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::core::model::Provider;
+use crate::core::usage::UsageRecord;
 use crate::providers::{ProviderError, ProviderSource};
-use crate::storage::repository::{ProjectRepo, SettingsRepo, UsageRepo};
+use crate::storage::repository::{BatchInsertStats, ProjectRepo, SettingsRepo, UsageRepo};
+
+/// Records are buffered into batches of this size before the dedup insert, so
+/// a full scan never holds every parsed record in memory at once.
+const INSERT_BATCH: usize = 2000;
 
 /// Outcome of scanning one provider.
 #[derive(Debug, Clone, Default)]
@@ -65,7 +71,32 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
         }
     }
 
-    let output = match source.scan() {
+    // Stream records out of the provider, dedup-inserting in bounded batches
+    // instead of accumulating the whole scan before writing.
+    let usage_repo = UsageRepo::new(conn);
+    let mut batch: Vec<UsageRecord> = Vec::with_capacity(INSERT_BATCH);
+    let mut insert_stats = BatchInsertStats::default();
+    let mut projects: BTreeSet<String> = BTreeSet::new();
+    let mut records: u64 = 0;
+    let mut flush_err: Option<anyhow::Error> = None;
+
+    let output = match source.scan(&mut |r| {
+        records += 1;
+        projects.insert(r.project.clone());
+        batch.push(r);
+        if batch.len() >= INSERT_BATCH {
+            if flush_err.is_none() {
+                match usage_repo.batch_insert_dedup(&batch) {
+                    Ok(s) => {
+                        insert_stats.inserted += s.inserted;
+                        insert_stats.skipped_duplicates += s.skipped_duplicates;
+                    }
+                    Err(e) => flush_err = Some(e),
+                }
+            }
+            batch.clear();
+        }
+    }) {
         Ok(o) => o,
         // Tool not installed on this machine — not an error.
         Err(ProviderError::DataDirNotFound(_)) => return Ok(summary),
@@ -75,20 +106,22 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
         }
     };
     summary.found_files = output.found_files;
-    summary.records = output.records.len() as u64;
-
-    let usage_repo = UsageRepo::new(conn);
-    let batch = usage_repo.batch_insert_dedup(&output.records)?;
-    summary.inserted = batch.inserted;
-    summary.skipped_duplicates = batch.skipped_duplicates;
+    summary.records = records;
+    if let Some(e) = flush_err {
+        return Err(e);
+    }
+    if !batch.is_empty() {
+        let s = usage_repo.batch_insert_dedup(&batch)?;
+        insert_stats.inserted += s.inserted;
+        insert_stats.skipped_duplicates += s.skipped_duplicates;
+    }
+    summary.inserted = insert_stats.inserted;
+    summary.skipped_duplicates = insert_stats.skipped_duplicates;
 
     let project_repo = ProjectRepo::new(conn);
-    let mut names: Vec<&str> = output.records.iter().map(|r| r.project.as_str()).collect();
-    names.sort_unstable();
-    names.dedup();
-    for name in names {
-        project_repo.upsert(name, &PathBuf::new(), &[source.provider()])?;
-        summary.projects.push(name.to_string());
+    for name in projects {
+        project_repo.upsert(&name, &PathBuf::new(), &[source.provider()])?;
+        summary.projects.push(name);
     }
 
     if let Some(fp) = &fingerprint {

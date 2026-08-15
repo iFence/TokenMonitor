@@ -8,19 +8,20 @@
 //! `payload.cwd`. Files without any `token_count` event (e.g. short or
 //! aborted sessions) simply produce no records.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
-use walkdir::WalkDir;
 
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
+use super::roots::discover_roots;
 use super::source::{
-    dir_fingerprint, fingerprint, ProviderConfig, ProviderError, ProviderSource, ScanOutput,
+    for_each_line, roots_fingerprint, scan_roots, ProviderConfig, ProviderError, ProviderSource,
+    ScanOutput, ScanRoot,
 };
 
 /// Minimal view of a Codex rollout line. One all-optional shape covers every
@@ -60,6 +61,9 @@ struct LastTokenUsage {
 
 pub struct CodexSource {
     config: ProviderConfig,
+    /// Discovered scan roots, computed lazily on the first scan (background
+    /// thread) so WSL discovery never blocks UI startup.
+    roots: OnceLock<Vec<ScanRoot>>,
 }
 
 /// Parsing state carried across the lines of one session file.
@@ -71,34 +75,52 @@ struct SessionState {
 
 impl CodexSource {
     pub fn new(config: ProviderConfig) -> Self {
-        CodexSource { config }
-    }
-
-    fn base_dir(&self) -> Result<PathBuf, ProviderError> {
-        if let Some(dir) = &self.config.data_dir_override {
-            return Ok(dir.clone());
+        CodexSource {
+            config,
+            roots: OnceLock::new(),
         }
-        let home = crate::platform::home_dir()
-            .map_err(|_| ProviderError::DataDirNotFound(Provider::Codex))?;
-        Ok(home.join(".codex").join("sessions"))
     }
 
-    fn parse_file(&self, path: &Path, rel: &Path) -> Result<Vec<UsageRecord>, String> {
-        let content = fs::read(path).map_err(|e| format!("read {:?}: {e}", path))?;
-        let text = String::from_utf8_lossy(&content);
+    fn roots(&self) -> &[ScanRoot] {
+        self.roots.get_or_init(|| {
+            if let Some(dir) = &self.config.data_dir_override {
+                vec![ScanRoot {
+                    dir: dir.clone(),
+                    label: None,
+                }]
+            } else {
+                discover_roots(&[".codex", "sessions"])
+            }
+        })
+    }
 
+    fn existing_roots(&self) -> Vec<ScanRoot> {
+        self.roots()
+            .iter()
+            .filter(|r| r.dir.is_dir())
+            .cloned()
+            .collect()
+    }
+
+    /// Stream the file line-by-line, carrying the cross-line parsing state
+    /// (session id, project, current model) and emitting one record per
+    /// `token_count` event without holding the raw text or the full record
+    /// set in memory.
+    fn parse_file(
+        path: &Path,
+        rel: &Path,
+        emit: &mut dyn FnMut(UsageRecord),
+    ) -> Result<(), String> {
         let mut state = SessionState {
             session_id: String::new(),
             project: String::new(),
             model: String::new(),
         };
-        let mut records = Vec::new();
-        for (line_idx, line) in text.lines().enumerate() {
+        for_each_line(path, |line, line_idx| {
             if let Some(r) = Self::parse_line(line, &mut state, rel, line_idx) {
-                records.push(r);
+                emit(r);
             }
-        }
-        Ok(records)
+        })
     }
 
     fn parse_line(
@@ -210,74 +232,45 @@ impl ProviderSource for CodexSource {
         Provider::Codex
     }
 
-    fn data_dir(&self) -> Result<PathBuf, ProviderError> {
-        let dir = self.base_dir()?;
-        if dir.is_dir() {
-            Ok(dir)
-        } else {
+    fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
+        let dirs: Vec<PathBuf> = self
+            .existing_roots()
+            .into_iter()
+            .map(|r| r.dir)
+            .collect();
+        if dirs.is_empty() {
             Err(ProviderError::DataDirNotFound(Provider::Codex))
+        } else {
+            Ok(dirs)
         }
     }
 
-    fn scan(&self) -> Result<ScanOutput, ProviderError> {
-        let dir = self.data_dir()?;
-        let mut out = ScanOutput::default();
-        let mut max_mtime = 0i64;
-        let mut total_bytes = 0u64;
-
-        for entry in WalkDir::new(&dir)
-            .max_depth(self.config.max_depth)
-            .follow_links(false)
-        {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    out.errors.push(format!("walk error: {e}"));
-                    continue;
-                }
-            };
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
-            let is_jsonl = path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("jsonl"));
-            if !is_jsonl {
-                continue;
-            }
-            let meta = match fs::metadata(path) {
-                Ok(m) => m,
-                Err(e) => {
-                    out.errors.push(format!("metadata {:?}: {e}", path));
-                    continue;
-                }
-            };
-            if meta.len() > self.config.max_file_size {
-                out.errors.push(format!("skip oversized {:?}", path));
-                continue;
-            }
-            out.found_files += 1;
-            total_bytes += meta.len();
-            if let Ok(modified) = meta.modified() {
-                if let Ok(unix) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    max_mtime = max_mtime.max(unix.as_secs() as i64);
-                }
-            }
-            let rel = path.strip_prefix(&dir).unwrap_or(path);
-            match self.parse_file(path, rel) {
-                Ok(records) => out.records.extend(records),
-                Err(e) => out.errors.push(e),
-            }
+    fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Codex));
         }
-
-        out.fingerprint = fingerprint(out.found_files, max_mtime, total_bytes);
-        Ok(out)
+        let mut errors = Vec::new();
+        let (found_files, fingerprint) = scan_roots(
+            &roots,
+            &self.config,
+            emit,
+            &mut errors,
+            &mut |path, rel, file_emit| Self::parse_file(path, rel, file_emit),
+        );
+        Ok(ScanOutput {
+            found_files,
+            fingerprint,
+            errors,
+        })
     }
 
     fn scan_fingerprint(&self) -> Result<String, ProviderError> {
-        let dir = self.data_dir()?;
-        dir_fingerprint(&dir, self.config.max_depth, self.config.max_file_size)
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Codex));
+        }
+        roots_fingerprint(&roots, self.config.max_depth, self.config.max_file_size)
     }
 }
 
@@ -312,18 +305,26 @@ mod tests {
         })
     }
 
+    /// Scan and collect the streamed records, mirroring how tests consume a
+    /// provider.
+    fn scan_collect(src: &CodexSource) -> (ScanOutput, Vec<UsageRecord>) {
+        let mut records = Vec::new();
+        let out = src.scan(&mut |r| records.push(r)).unwrap();
+        (out, records)
+    }
+
     #[test]
     fn parses_token_count_events_into_records() {
         let dir = tempdir().unwrap();
         write_session_file(dir.path());
 
-        let out = source_for(dir.path()).scan().unwrap();
+        let (out, records) = scan_collect(&source_for(dir.path()));
         assert_eq!(out.found_files, 1);
-        assert_eq!(out.records.len(), 2, "one record per token_count event");
+        assert_eq!(records.len(), 2, "one record per token_count event");
         assert!(out.errors.is_empty());
 
         // First request: input incl. cache minus cached, cache kept separate.
-        let first = &out.records[0];
+        let first = &records[0];
         assert_eq!(first.provider, Provider::Codex);
         assert_eq!(first.project, "rToken");
         assert_eq!(first.session_id, "019fdbca-a8c9-7132-853b-77eb29823eeb");
@@ -337,7 +338,7 @@ mod tests {
         // Dedup key is the relative path + line index, like Claude.
         assert!(first.fingerprint.ends_with(":2"));
 
-        let second = &out.records[1];
+        let second = &records[1];
         assert_eq!(second.usage.input_tokens, 34478 - 23296);
         assert_eq!(second.usage.cache_read_tokens, 23296);
         assert_eq!(second.usage.output_tokens, 701);
@@ -356,19 +357,72 @@ mod tests {
         )
         .unwrap();
 
-        let out = source_for(dir.path()).scan().unwrap();
+        let (out, records) = scan_collect(&source_for(dir.path()));
         assert_eq!(out.found_files, 1);
-        assert!(out.records.is_empty());
+        assert!(records.is_empty());
     }
 
     #[test]
     fn data_dir_missing_is_data_dir_not_found() {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("no-such-dir");
-        let err = source_for(&missing).data_dir().unwrap_err();
+        let err = source_for(&missing).data_dirs().unwrap_err();
         assert!(matches!(
             err,
             ProviderError::DataDirNotFound(Provider::Codex)
         ));
+    }
+
+    /// Two roots (local home + a WSL distro) must both stream records into the
+    /// same provider, with the labelled root's dedup fingerprints namespaced so
+    /// identically-named session files in each root don't collide.
+    #[test]
+    fn merges_multiple_roots_with_namespaced_fingerprints() {
+        let local = tempdir().unwrap();
+        let wsl = tempdir().unwrap();
+        // Same file name in both roots — the collision the label prevents.
+        write_session_file(local.path());
+        write_session_file(wsl.path());
+
+        let config = ProviderConfig::for_provider(Provider::Codex);
+        let roots = vec![
+            ScanRoot {
+                dir: local.path().to_path_buf(),
+                label: None,
+            },
+            ScanRoot {
+                dir: wsl.path().to_path_buf(),
+                label: Some("wsl/Ubuntu-20.04/yulei".to_string()),
+            },
+        ];
+
+        let mut records = Vec::new();
+        let mut errors = Vec::new();
+        let (found_files, _fingerprint) = scan_roots(
+            &roots,
+            &config,
+            &mut |r| records.push(r),
+            &mut errors,
+            &mut |path, rel, file_emit| CodexSource::parse_file(path, rel, file_emit),
+        );
+
+        assert_eq!(found_files, 2);
+        assert!(errors.is_empty());
+        assert_eq!(records.len(), 4, "two token_count events per file");
+
+        // The labelled root's fingerprints are namespaced; the primary root's
+        // are not. Use a path prefix so this is separator-agnostic.
+        let label = Path::new("wsl").join("Ubuntu-20.04").join("yulei");
+        let primary: Vec<_> = records
+            .iter()
+            .filter(|r| !Path::new(&r.fingerprint).starts_with(&label))
+            .collect();
+        let wsl_records: Vec<_> = records
+            .iter()
+            .filter(|r| Path::new(&r.fingerprint).starts_with(&label))
+            .collect();
+        assert_eq!(primary.len(), 2);
+        assert_eq!(wsl_records.len(), 2);
+        assert_eq!(primary.len() + wsl_records.len(), records.len());
     }
 }

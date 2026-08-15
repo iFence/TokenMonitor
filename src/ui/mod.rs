@@ -50,6 +50,7 @@ pub fn router(app: &mut RTokenApp, window: &mut Window, cx: &mut Context<RTokenA
         ActivePage::Dashboard => dashboard::render_page(app, window, cx),
         ActivePage::Project => project::render_page(app, window, cx),
         ActivePage::Settings => settings::render_page(app, window, cx),
+        ActivePage::Charts => charts::page::render_page(app, window, cx),
     }
 }
 
