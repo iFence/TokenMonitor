@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::core::aggregation::SumStats;
 use crate::core::model::{Period, Provider, ProviderSelection, TimeWindow};
@@ -156,36 +156,47 @@ pub enum ChartMetric {
     #[default]
     TotalTokens,
     OutputTokens,
+    InputTokens,
+    CacheRead,
+    CacheHitRate,
     Cost,
 }
 
 impl ChartMetric {
-    pub const ALL: [ChartMetric; 3] = [Self::TotalTokens, Self::OutputTokens, Self::Cost];
+    pub const ALL: [ChartMetric; 6] = [
+        Self::TotalTokens,
+        Self::OutputTokens,
+        Self::InputTokens,
+        Self::CacheRead,
+        Self::CacheHitRate,
+        Self::Cost,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::TotalTokens => "总Token",
             Self::OutputTokens => "输出Token",
+            Self::InputTokens => "输入Token",
+            Self::CacheRead => "缓存读",
+            Self::CacheHitRate => "缓存命中率",
             Self::Cost => "花费",
         }
     }
 }
 
-/// Chart rendering mode.
+/// App filter for the per-model chart: every enabled app, or a single app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChartKind {
+pub enum ChartApp {
     #[default]
-    Line,
-    Bar,
+    All,
+    One(Provider),
 }
 
-impl ChartKind {
-    pub const ALL: [ChartKind; 2] = [Self::Line, Self::Bar];
-
+impl ChartApp {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Line => "折线图",
-            Self::Bar => "柱状图",
+            Self::All => "全部",
+            Self::One(provider) => provider.display_name(),
         }
     }
 }
@@ -205,10 +216,23 @@ pub struct ChartsSnapshot {
 pub struct ChartsState {
     pub range: ChartRange,
     pub metric: ChartMetric,
-    pub kind: ChartKind,
-    /// Provider shown in the per-model chart.
-    pub provider: Provider,
+    /// App filter for the per-model chart (all apps, or a single app).
+    pub app: ChartApp,
+    /// Custom date range (East-8, both endpoints inclusive) overriding `range`.
+    pub custom_range: Option<(NaiveDate, NaiveDate)>,
     pub data: Option<ChartsSnapshot>,
+}
+
+impl ChartsState {
+    /// Time window for the current chart selection; `custom_range` wins over
+    /// the preset `range` when set.
+    pub fn window(&self, now: DateTime<Utc>) -> TimeWindow {
+        if let Some((start, end)) = self.custom_range {
+            TimeWindow::custom(start, end)
+        } else {
+            self.range.window(now)
+        }
+    }
 }
 
 /// A complete set of aggregate view data, computed on a background thread and

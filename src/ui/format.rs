@@ -30,6 +30,11 @@ pub fn format_cost_f64(v: f64) -> String {
     format!("${:.2}", v)
 }
 
+/// Percentage (0–100) → "85.3%".
+pub fn format_percent_f64(v: f64) -> String {
+    format!("{v:.1}%")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

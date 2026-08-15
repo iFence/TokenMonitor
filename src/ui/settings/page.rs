@@ -118,9 +118,9 @@ fn applications_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyEl
                         .label(provider.display_name())
                         .on_click({
                             let weak = weak.clone();
-                            move |checked, _: &mut Window, cx: &mut App| {
+                            move |checked, window: &mut Window, cx: &mut App| {
                                 let _ = weak.update(cx, |this, cx| {
-                                    this.set_provider_enabled(provider, *checked, cx);
+                                    this.set_provider_enabled(provider, *checked, window, cx);
                                 });
                             }
                         }),
@@ -189,7 +189,7 @@ fn reorder_button(
         .ghost()
         .icon(icon)
         .disabled(disabled)
-        .on_click(move |_, _: &mut Window, cx: &mut App| {
-            let _ = weak.update(cx, |this, cx| this.move_provider(provider, dir, cx));
+        .on_click(move |_, window: &mut Window, cx: &mut App| {
+            let _ = weak.update(cx, |this, cx| this.move_provider(provider, dir, window, cx));
         })
 }

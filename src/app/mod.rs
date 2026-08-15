@@ -7,7 +7,7 @@ pub mod state;
 pub use actions::Quit;
 pub use app::RTokenApp;
 pub use state::{
-    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
+    ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
     ScanStatus, TimeTab, ViewSnapshot,
 };
 

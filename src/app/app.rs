@@ -1,15 +1,20 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_channel::{unbounded, Receiver, Sender};
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use gpui::{
-    App, Context, FocusHandle, Focusable, InteractiveElement, IntoElement, ParentElement, Render,
-    Styled, WeakEntity, Window,
+    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, Styled, WeakEntity, Window,
 };
-use gpui_component::v_flex;
+use gpui_component::calendar::Date;
+use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
+use gpui_component::select::{SelectEvent, SelectState};
+use gpui_component::{v_flex, IndexPath};
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
+use crate::core::aggregation::SumStats;
 use crate::core::model::{Provider, ProviderSelection, TimeWindow};
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
@@ -17,7 +22,7 @@ use crate::storage::sqlite;
 use crate::ui;
 
 use super::state::{
-    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus,
+    ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus,
     SettingsGroup, TimeTab, ViewSnapshot,
 };
 
@@ -35,6 +40,10 @@ pub struct RTokenApp {
     view_tx: Sender<ViewSnapshot>,
     view_rx: Receiver<ViewSnapshot>,
     view_seq: u64,
+    /// Stateful dropdown / date-picker entities for the charts page controls.
+    pub chart_metric_select: Entity<SelectState<Vec<ChartMetric>>>,
+    pub chart_app_select: Entity<SelectState<Vec<ChartApp>>>,
+    pub chart_range_picker: Entity<DatePickerState>,
 }
 
 impl RTokenApp {
@@ -45,6 +54,26 @@ impl RTokenApp {
         let collector = Arc::new(Collector::open(&db_path).expect("open collector"));
         let scheduler = scheduler::start_scheduler(collector.clone(), SCAN_INTERVAL);
         let (view_tx, view_rx) = unbounded();
+
+        let selection = collector.selection();
+
+        // Stateful dropdown / date-picker entities live for the app's lifetime;
+        // recreating them each render would reset open state on every notify.
+        let chart_metric_select = cx.new(|cx| {
+            SelectState::new(
+                ChartMetric::ALL.to_vec(),
+                Some(IndexPath::default()),
+                window,
+                cx,
+            )
+        });
+        let mut chart_app_options = vec![ChartApp::All];
+        chart_app_options.extend(selection.enabled().into_iter().map(ChartApp::One));
+        let chart_app_select = cx.new(|cx| {
+            SelectState::new(chart_app_options, Some(IndexPath::default()), window, cx)
+        });
+        let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
+
         let mut app = RTokenApp {
             state: AppState::default(),
             collector,
@@ -54,8 +83,61 @@ impl RTokenApp {
             view_tx,
             view_rx,
             view_seq: 0,
+            chart_metric_select,
+            chart_app_select,
+            chart_range_picker,
         };
-        app.state.provider_selection = app.collector.selection();
+        app.state.provider_selection = selection;
+        app.sync_chart_app_select(window, cx);
+
+        // Dispatch dropdown / date-picker events back into app handlers.
+        {
+            let metric = app.chart_metric_select.clone();
+            cx.subscribe_in(
+                &metric,
+                window,
+                |this, _, ev: &SelectEvent<Vec<ChartMetric>>, _, cx| {
+                    if let SelectEvent::Confirm(Some(m)) = ev {
+                        this.select_chart_metric(*m, cx);
+                    }
+                },
+            )
+            .detach();
+        }
+        {
+            let app_select = app.chart_app_select.clone();
+            cx.subscribe_in(
+                &app_select,
+                window,
+                |this, _, ev: &SelectEvent<Vec<ChartApp>>, _, cx| {
+                    if let SelectEvent::Confirm(Some(app)) = ev {
+                        this.select_chart_app(*app, cx);
+                    }
+                },
+            )
+            .detach();
+        }
+        {
+            let picker = app.chart_range_picker.clone();
+            cx.subscribe_in(
+                &picker,
+                window,
+                |this, _, ev: &DatePickerEvent, _, cx| match ev {
+                    DatePickerEvent::Change(Date::Range(Some(start), Some(end))) => {
+                        this.select_chart_custom_range(*start, *end, cx);
+                    }
+                    DatePickerEvent::Change(Date::Range(_, _)) => {
+                        // Cleared: fall back to the preset range.
+                        this.state.charts.custom_range = None;
+                        this.refresh_view(cx);
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
+        }
+
         app.spawn_event_loop(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
         app.refresh_view(cx); // async: returns immediately, fills state in background
@@ -102,8 +184,30 @@ impl RTokenApp {
 
     /// Charts control handlers. Range/provider changes re-query; metric/kind
     /// changes are pure render-time transforms.
-    pub fn select_chart_range(&mut self, range: ChartRange, cx: &mut Context<Self>) {
+    pub fn select_chart_range(
+        &mut self,
+        range: ChartRange,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.state.charts.range = range;
+        self.state.charts.custom_range = None;
+        self.chart_range_picker.update(cx, |picker, cx| {
+            picker.set_date(Date::Range(None, None), window, cx);
+        });
+        self.refresh_view(cx);
+        cx.notify();
+    }
+
+    /// Set a custom (East-8, inclusive) date range, overriding the preset.
+    pub fn select_chart_custom_range(
+        &mut self,
+        start: NaiveDate,
+        end: NaiveDate,
+        cx: &mut Context<Self>,
+    ) {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        self.state.charts.custom_range = Some((start, end));
         self.refresh_view(cx);
         cx.notify();
     }
@@ -113,13 +217,8 @@ impl RTokenApp {
         cx.notify();
     }
 
-    pub fn select_chart_kind(&mut self, kind: ChartKind, cx: &mut Context<Self>) {
-        self.state.charts.kind = kind;
-        cx.notify();
-    }
-
-    pub fn select_chart_provider(&mut self, provider: Provider, cx: &mut Context<Self>) {
-        self.state.charts.provider = provider;
+    pub fn select_chart_app(&mut self, app: ChartApp, cx: &mut Context<Self>) {
+        self.state.charts.app = app;
         self.refresh_view(cx);
         cx.notify();
     }
@@ -139,22 +238,34 @@ impl RTokenApp {
         &mut self,
         provider: Provider,
         enabled: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mut selection = self.state.provider_selection.clone();
         selection.set_enabled(provider, enabled);
-        self.apply_provider_selection(selection, cx);
+        self.apply_provider_selection(selection, window, cx);
     }
 
     /// Move a provider up (`dir < 0`) or down (`dir > 0`) in the app order.
-    pub fn move_provider(&mut self, provider: Provider, dir: isize, cx: &mut Context<Self>) {
+    pub fn move_provider(
+        &mut self,
+        provider: Provider,
+        dir: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut selection = self.state.provider_selection.clone();
         selection.move_entry(provider, dir);
-        self.apply_provider_selection(selection, cx);
+        self.apply_provider_selection(selection, window, cx);
     }
 
     /// Persist a new selection, rebuild scan sources, and refresh the view.
-    fn apply_provider_selection(&mut self, selection: ProviderSelection, cx: &mut Context<Self>) {
+    fn apply_provider_selection(
+        &mut self,
+        selection: ProviderSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.state.provider_selection = selection.clone();
 
         // Drop UI state that points at a now-disabled provider.
@@ -163,20 +274,38 @@ impl RTokenApp {
                 self.state.expanded_provider = None;
             }
         }
-        if !selection.is_enabled(self.state.charts.provider) {
-            self.state.charts.provider = selection
-                .enabled()
-                .first()
-                .copied()
-                .unwrap_or(Provider::Claude);
+        // Drop the per-model app filter if it points at a now-disabled app.
+        if let ChartApp::One(provider) = self.state.charts.app {
+            if !selection.is_enabled(provider) {
+                self.state.charts.app = ChartApp::All;
+            }
         }
 
         if let Err(e) = self.collector.set_selection(selection) {
             self.state.last_error = Some(format!("save app selection: {e}"));
         }
+        self.sync_chart_app_select(window, cx);
         self.trigger_scan(cx);
         self.refresh_view(cx);
         cx.notify();
+    }
+
+    /// Rebuild the charts app dropdown ("全部" + enabled apps) from the current
+    /// selection and re-select the active app filter.
+    fn sync_chart_app_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut options = vec![ChartApp::All];
+        options.extend(
+            self.state
+                .provider_selection
+                .enabled()
+                .into_iter()
+                .map(ChartApp::One),
+        );
+        let selected = self.state.charts.app;
+        self.chart_app_select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
+            select.set_selected_value(&selected, window, cx);
+        });
     }
 
     /// Forward collector events into app state, refreshing the view after each scan.
@@ -240,10 +369,7 @@ impl RTokenApp {
         let time_tab = self.state.time_tab;
         let window = time_tab.window(now);
         let charts = if self.state.active_page == ActivePage::Charts {
-            Some((
-                self.state.charts.range.window(now),
-                self.state.charts.provider,
-            ))
+            Some((self.state.charts.window(now), self.state.charts.app))
         } else {
             None
         };
@@ -285,7 +411,7 @@ fn compute_view_snapshot(
     time_tab: TimeTab,
     db_path: &std::path::Path,
     window: TimeWindow,
-    charts: Option<(TimeWindow, Provider)>,
+    charts: Option<(TimeWindow, ChartApp)>,
     enabled: &[Provider],
 ) -> ViewSnapshot {
     let mut snap = ViewSnapshot {
@@ -324,13 +450,8 @@ fn compute_view_snapshot(
         Ok(v) => snap.by_day = v,
         Err(e) => snap.error = Some(format!("query failed: {e}")),
     }
-    if let Some((chart_window, provider)) = charts {
-        snap.charts = Some(compute_chart_snapshot(
-            &repo,
-            chart_window,
-            provider,
-            enabled,
-        ));
+    if let Some((chart_window, app)) = charts {
+        snap.charts = Some(compute_chart_snapshot(&repo, chart_window, app, enabled));
     }
     snap
 }
@@ -339,7 +460,7 @@ fn compute_view_snapshot(
 fn compute_chart_snapshot(
     repo: &UsageRepo<'_>,
     window: TimeWindow,
-    provider: Provider,
+    app: ChartApp,
     enabled: &[Provider],
 ) -> ChartsSnapshot {
     let mut snap = ChartsSnapshot::default();
@@ -348,10 +469,38 @@ fn compute_chart_snapshot(
             snap.provider_series.push((p, series));
         }
     }
-    if let Ok(models) = repo.daily_series_by_provider_model(provider, &window) {
-        snap.model_series = models;
-    }
+    snap.model_series = match app {
+        ChartApp::All => {
+            let mut merged: BTreeMap<String, Vec<(String, SumStats)>> = BTreeMap::new();
+            for &p in enabled {
+                if let Ok(models) = repo.daily_series_by_provider_model(p, &window) {
+                    merge_model_series(&mut merged, models);
+                }
+            }
+            merged
+        }
+        ChartApp::One(provider) => repo
+            .daily_series_by_provider_model(provider, &window)
+            .unwrap_or_default(),
+    };
     snap
+}
+
+/// Merge per-model daily series from one provider into the cross-app map,
+/// summing `SumStats` for matching (model, day) keys.
+fn merge_model_series(
+    dst: &mut BTreeMap<String, Vec<(String, SumStats)>>,
+    src: BTreeMap<String, Vec<(String, SumStats)>>,
+) {
+    for (model, series) in src {
+        let entry = dst.entry(model).or_default();
+        for (day, stats) in series {
+            match entry.iter_mut().find(|(d, _)| *d == day) {
+                Some((_, acc)) => acc.add(&stats),
+                None => entry.push((day, stats)),
+            }
+        }
+    }
 }
 
 impl Focusable for RTokenApp {

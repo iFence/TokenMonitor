@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::core::time::{east8, east8_local, east8_to_utc};
@@ -30,8 +30,8 @@ impl TimeWindow {
         }
     }
 
-    /// Window covering the trailing `n` days (exclusive of today) up to `now`.
-    /// Day boundaries are measured in East-8 time.
+    /// Window covering the trailing `n` East-8 calendar days ending today, with
+    /// today included as a partial day up to `now`.
     pub fn last_n_days(n: i64, now: DateTime<Utc>) -> Self {
         let today_start = east8_to_utc(
             east8_local(now)
@@ -40,7 +40,7 @@ impl TimeWindow {
                 .expect("midnight is valid"),
         );
         TimeWindow {
-            start: today_start - Duration::days(n),
+            start: today_start - Duration::days(n - 1),
             end: now,
             period: Period::All,
         }
@@ -98,6 +98,24 @@ impl TimeWindow {
         TimeWindow {
             start,
             end,
+            period: Period::All,
+        }
+    }
+
+    /// Window covering `[start 00:00 +08, end+1 00:00 +08)` for two East-8
+    /// calendar dates (both endpoints inclusive). `start > end` is swapped so
+    /// the window is never inverted.
+    pub fn custom(start: NaiveDate, end: NaiveDate) -> Self {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let start_utc = east8_to_utc(start.and_hms_opt(0, 0, 0).expect("midnight is valid"));
+        let end_utc = east8_to_utc(
+            (end + Duration::days(1))
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight is valid"),
+        );
+        TimeWindow {
+            start: start_utc,
+            end: end_utc,
             period: Period::All,
         }
     }
@@ -204,5 +222,34 @@ mod tests {
         // 2026-12-31 23:00 UTC == 2027-01-01 07:00 +08 — the new year, excluded.
         assert!(!w.contains(at(2026, 12, 31, 23)));
         assert!(!w.contains(at(2027, 1, 1, 0)));
+    }
+
+    #[test]
+    fn custom_range_uses_east8_bounds_and_swaps_inverted() {
+        // 2026-08-10 ~ 2026-08-12 (inclusive) measured in East-8 calendar days.
+        let w = TimeWindow::custom(
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+        );
+        assert_eq!(w.start, at(2026, 8, 9, 16)); // 2026-08-10 00:00 +08
+        assert_eq!(w.end, at(2026, 8, 12, 16)); // 2026-08-13 00:00 +08 (exclusive)
+        assert!(w.contains(at(2026, 8, 12, 15))); // 23:00 +08 on the last day
+        assert!(!w.contains(at(2026, 8, 12, 16))); // next day, excluded
+
+        // Inverted inputs are swapped, not left as an empty window.
+        let swapped = TimeWindow::custom(
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+        );
+        assert_eq!(swapped, w);
+    }
+
+    #[test]
+    fn last_n_days_spans_exactly_n_calendar_days() {
+        // 2026-08-14 15:00 UTC == 2026-08-14 23:00 +08, so "today" is Aug 14.
+        let w = TimeWindow::last_n_days(7, at(2026, 8, 14, 15));
+        // 7 days ending today: Aug 8 ..= Aug 14 in East-8 time.
+        assert_eq!(w.start, at(2026, 8, 7, 16)); // Aug 8 00:00 +08
+        assert_eq!(w.end, at(2026, 8, 14, 15)); // now (partial today)
     }
 }
