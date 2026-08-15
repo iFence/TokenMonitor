@@ -2,7 +2,11 @@
 
 use super::source::ScanRoot;
 #[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::sync::OnceLock;
 
 /// Every candidate data directory for a provider: the local home dir (no label)
 /// plus, on Windows, each WSL distro's home dir (labelled `wsl/<distro>/<user>`
@@ -46,21 +50,36 @@ fn discover_wsl_roots(suffix: &[&str]) -> Vec<ScanRoot> {
     roots
 }
 
+/// `wsl.exe` is a console-subsystem process; when rToken (a GUI-subsystem app)
+/// spawns it without this flag, Windows allocates a fresh console window that
+/// flashes briefly on every launch.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// Names of installed WSL distributions via `wsl.exe --list --quiet`.
 #[cfg(windows)]
 fn wsl_distros() -> Vec<String> {
-    let Ok(out) = std::process::Command::new("wsl.exe")
-        .args(["--list", "--quiet"])
-        .output()
-    else {
-        return Vec::new();
-    };
-    let text = decode_wsl_stdout(&out.stdout);
-    text.lines()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect()
+    // The installed-distro set is stable for the lifetime of a run, and both the
+    // Claude and Codex adapters call this during their first scan — cache it so
+    // `wsl.exe` runs once per process instead of once per adapter.
+    static DISTROS: OnceLock<Vec<String>> = OnceLock::new();
+    DISTROS
+        .get_or_init(|| {
+            let Ok(out) = std::process::Command::new("wsl.exe")
+                .args(["--list", "--quiet"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+            else {
+                return Vec::new();
+            };
+            let text = decode_wsl_stdout(&out.stdout);
+            text.lines()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .clone()
 }
 
 /// `wsl.exe` writes UTF-16LE to a redirected stdout; fall back to UTF-8 for
