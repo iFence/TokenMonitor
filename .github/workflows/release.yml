@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  windows-release:
+    name: Windows installer
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.95.0; this action reads that file.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --version 0.3.9
+
+      - name: Install WiX Toolset v3
+        run: choco install wixtoolset -y --no-progress
+
+      - name: Build MSI installer
+        run: cargo wix
+
+      - name: Build portable zip
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $root = "target/rtoken-portable-windows-x64"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Copy-Item "target/release/rtoken-app.exe" "$root/"
+          Copy-Item "README.md" "$root/"
+          Copy-Item "LICENSE" "$root/"
+          if (-not (Test-Path "$root/rtoken-app.exe")) {
+            throw "rtoken-app.exe is missing from the portable bundle"
+          }
+          Compress-Archive -Path "$root/*" -DestinationPath "target/rtoken-v$version-windows-x64.zip"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/wix/*.msi
+            target/rtoken-*-windows-x64.zip
+          fail_on_unmatched_files: true
