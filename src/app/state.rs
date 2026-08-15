@@ -123,18 +123,16 @@ pub enum ChartRange {
     #[default]
     Last7,
     Last30,
-    Last90,
     ThisYear,
 }
 
 impl ChartRange {
-    pub const ALL: [ChartRange; 4] = [Self::Last7, Self::Last30, Self::Last90, Self::ThisYear];
+    pub const ALL: [ChartRange; 3] = [Self::Last7, Self::Last30, Self::ThisYear];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Last7 => "近7天",
             Self::Last30 => "近30天",
-            Self::Last90 => "近90天",
             Self::ThisYear => "本年",
         }
     }
@@ -144,7 +142,6 @@ impl ChartRange {
         match self {
             Self::Last7 => TimeWindow::last_n_days(7, now),
             Self::Last30 => TimeWindow::last_n_days(30, now),
-            Self::Last90 => TimeWindow::last_n_days(90, now),
             Self::ThisYear => TimeWindow::current_year(now),
         }
     }

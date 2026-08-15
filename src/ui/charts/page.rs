@@ -122,7 +122,6 @@ fn trend_bucket(charts: &ChartsState) -> Bucket {
         match charts.range {
             ChartRange::Last7 => 7,
             ChartRange::Last30 => 30,
-            ChartRange::Last90 => 90,
             ChartRange::ThisYear => 366,
         }
     };
