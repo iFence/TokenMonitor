@@ -3,8 +3,8 @@
 use chrono::{Duration, TimeZone, Utc};
 
 use rtoken::aggregation::{by_day, by_model, by_project, by_provider, total};
-use rtoken::model::{ModelPricing, Period, Provider, TimeWindow, Usage};
-use rtoken::pricing::compute_cost_micros;
+use rtoken::model::{Period, Provider, TimeWindow, Usage};
+use rtoken::pricing::Pricer;
 use rtoken::quota::QuotaTracker;
 use rtoken::usage::UsageRecord;
 
@@ -75,32 +75,17 @@ fn by_project_and_by_day_and_by_model_group() {
 }
 
 #[test]
-fn compute_cost_matches_model_and_ignores_mismatch() {
-    let pricing = ModelPricing {
-        provider: Provider::Claude,
-        model: "claude-opus-4".to_string(),
-        input_usd_per_mtok: 15.0,
-        output_usd_per_mtok: 75.0,
-        cache_read_usd_per_mtok: 1.5,
-        cache_write_usd_per_mtok: 18.75,
-    };
-    let usage = Usage {
-        model: "claude-opus-4".to_string(),
-        started_at: Utc::now(),
-        input_tokens: 1_000_000,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cost_micros: 0,
-    };
-    // 1M input tokens at $15/Mtok = $15 = 15_000_000 micros.
-    assert_eq!(compute_cost_micros(&pricing, &usage), 15_000_000);
+fn pricer_computes_cost_for_known_model_and_zero_for_unknown() {
+    // 1M input tokens on claude-opus-4.8 at $5/Mtok = $5 = 5_000_000 micros.
+    let cost =
+        Pricer::global().cost_micros(Provider::Claude, "claude-opus-4-8", 1_000_000, 0, 0, 0);
+    assert_eq!(cost, 5_000_000);
 
-    let other = Usage {
-        model: "other".to_string(),
-        ..usage
-    };
-    assert_eq!(compute_cost_micros(&pricing, &other), 0);
+    // Empty model name has no price, so its cost is 0.
+    assert_eq!(
+        Pricer::global().cost_micros(Provider::Claude, "", 1_000_000, 0, 0, 0),
+        0
+    );
 }
 
 #[test]

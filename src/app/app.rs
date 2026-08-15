@@ -10,7 +10,7 @@ use gpui::{
 use gpui_component::v_flex;
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
-use crate::core::model::{Provider, TimeWindow};
+use crate::core::model::{Provider, ProviderSelection, TimeWindow};
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
 use crate::storage::sqlite;
@@ -55,6 +55,7 @@ impl RTokenApp {
             view_rx,
             view_seq: 0,
         };
+        app.state.provider_selection = app.collector.selection();
         app.spawn_event_loop(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
         app.refresh_view(cx); // async: returns immediately, fills state in background
@@ -67,7 +68,7 @@ impl RTokenApp {
             Ok(()) => {
                 self.state.scan_status = ScanStatus::Scanning {
                     completed: 0,
-                    total: Provider::ALL.len() as u32,
+                    total: self.collector.sources().len() as u32,
                 };
                 self.state.last_error = None;
             }
@@ -127,6 +128,51 @@ impl RTokenApp {
         cx.notify();
     }
 
+    /// Toggle whether a provider is tracked (the keep checkbox in settings).
+    pub fn set_provider_enabled(
+        &mut self,
+        provider: Provider,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut selection = self.state.provider_selection.clone();
+        selection.set_enabled(provider, enabled);
+        self.apply_provider_selection(selection, cx);
+    }
+
+    /// Move a provider up (`dir < 0`) or down (`dir > 0`) in the app order.
+    pub fn move_provider(&mut self, provider: Provider, dir: isize, cx: &mut Context<Self>) {
+        let mut selection = self.state.provider_selection.clone();
+        selection.move_entry(provider, dir);
+        self.apply_provider_selection(selection, cx);
+    }
+
+    /// Persist a new selection, rebuild scan sources, and refresh the view.
+    fn apply_provider_selection(&mut self, selection: ProviderSelection, cx: &mut Context<Self>) {
+        self.state.provider_selection = selection.clone();
+
+        // Drop UI state that points at a now-disabled provider.
+        if let Some(expanded) = self.state.expanded_provider {
+            if !selection.is_enabled(expanded) {
+                self.state.expanded_provider = None;
+            }
+        }
+        if !selection.is_enabled(self.state.charts.provider) {
+            self.state.charts.provider = selection
+                .enabled()
+                .first()
+                .copied()
+                .unwrap_or(Provider::Claude);
+        }
+
+        if let Err(e) = self.collector.set_selection(selection) {
+            self.state.last_error = Some(format!("save app selection: {e}"));
+        }
+        self.trigger_scan(cx);
+        self.refresh_view(cx);
+        cx.notify();
+    }
+
     /// Forward collector events into app state, refreshing the view after each scan.
     fn spawn_event_loop(&self, cx: &mut Context<Self>) {
         let receiver = self.collector.events();
@@ -151,7 +197,7 @@ impl RTokenApp {
             CollectorEvent::ScanStarted { .. } => {
                 self.state.scan_status = ScanStatus::Scanning {
                     completed: 0,
-                    total: Provider::ALL.len() as u32,
+                    total: self.collector.sources().len() as u32,
                 };
             }
             CollectorEvent::ScanCompleted { summary } => {
@@ -188,16 +234,21 @@ impl RTokenApp {
         let time_tab = self.state.time_tab;
         let window = time_tab.window(now);
         let charts = if self.state.active_page == ActivePage::Charts {
-            Some((self.state.charts.range.window(now), self.state.charts.provider))
+            Some((
+                self.state.charts.range.window(now),
+                self.state.charts.provider,
+            ))
         } else {
             None
         };
+        let enabled = self.state.provider_selection.enabled();
         let tx = self.view_tx.clone();
 
         std::thread::Builder::new()
             .name("rtoken-aggregate".into())
             .spawn(move || {
-                let snapshot = compute_view_snapshot(seq, time_tab, &db_path, window, charts);
+                let snapshot =
+                    compute_view_snapshot(seq, time_tab, &db_path, window, charts, &enabled);
                 let _ = tx.send_blocking(snapshot);
             })
             .expect("spawn aggregate thread");
@@ -229,6 +280,7 @@ fn compute_view_snapshot(
     db_path: &std::path::Path,
     window: TimeWindow,
     charts: Option<(TimeWindow, Provider)>,
+    enabled: &[Provider],
 ) -> ViewSnapshot {
     let mut snap = ViewSnapshot {
         seq,
@@ -267,7 +319,12 @@ fn compute_view_snapshot(
         Err(e) => snap.error = Some(format!("query failed: {e}")),
     }
     if let Some((chart_window, provider)) = charts {
-        snap.charts = Some(compute_chart_snapshot(&repo, chart_window, provider));
+        snap.charts = Some(compute_chart_snapshot(
+            &repo,
+            chart_window,
+            provider,
+            enabled,
+        ));
     }
     snap
 }
@@ -277,9 +334,10 @@ fn compute_chart_snapshot(
     repo: &UsageRepo<'_>,
     window: TimeWindow,
     provider: Provider,
+    enabled: &[Provider],
 ) -> ChartsSnapshot {
     let mut snap = ChartsSnapshot::default();
-    for p in Provider::ALL {
+    for &p in enabled {
         if let Ok(series) = repo.daily_series_by_provider(p, &window) {
             snap.provider_series.push((p, series));
         }

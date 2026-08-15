@@ -10,7 +10,6 @@ use gpui_component::{h_flex, v_flex};
 use crate::app::app::RTokenApp;
 use crate::app::state::TimeTab;
 use crate::core::aggregation::SumStats;
-use crate::core::model::Provider;
 
 use super::card::provider_card;
 
@@ -61,10 +60,11 @@ fn tab_bar(app: &RTokenApp, cx: &Context<RTokenApp>) -> impl IntoElement {
         )
 }
 
-/// Two-column grid of provider cards over `Provider::ALL` (zero-usage
-/// providers included).
+/// Two-column grid of provider cards over the enabled providers in selection
+/// order (zero-usage providers included).
 fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoElement {
     let tab_label = app.state.time_tab.label();
+    let providers = app.state.provider_selection.enabled();
     v_flex()
         .id("dashboard-grid")
         .flex_1()
@@ -72,7 +72,7 @@ fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoEleme
         .overflow_y_scroll()
         .p_4()
         .gap_4()
-        .children(Provider::ALL.chunks(2).map(|row| {
+        .children(providers.chunks(2).map(|row| {
             h_flex()
                 .gap_4()
                 .children(row.iter().map(|provider| {

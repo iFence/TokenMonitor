@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 
 use crate::core::aggregation::SumStats;
-use crate::core::model::{Period, Provider, TimeWindow};
+use crate::core::model::{Period, Provider, ProviderSelection, TimeWindow};
 
 /// The active navigation page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -86,6 +86,7 @@ pub struct AppState {
     pub time_tab: TimeTab,
     pub expanded_provider: Option<Provider>,
     pub selected_project: Option<String>,
+    pub provider_selection: ProviderSelection,
     pub scan_status: ScanStatus,
     pub last_error: Option<String>,
     pub summary: Option<SumStats>,
@@ -173,7 +174,7 @@ impl ChartKind {
 /// changes are render-time transforms rather than DB re-queries.
 #[derive(Debug, Clone, Default)]
 pub struct ChartsSnapshot {
-    /// Per-provider daily series, in `Provider::ALL` order.
+    /// Per-provider daily series, in selection order.
     pub provider_series: Vec<(Provider, Vec<(String, SumStats)>)>,
     /// Per-model daily series for the selected provider.
     pub model_series: BTreeMap<String, Vec<(String, SumStats)>>,

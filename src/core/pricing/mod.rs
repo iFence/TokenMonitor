@@ -1,5 +1,8 @@
-//! Model pricing and cost computation.
+//! Model pricing and cost computation, mirroring tokei's cost model.
 
-mod cost;
+mod data;
+mod normalize;
+mod pricer;
 
-pub use cost::compute_cost_micros;
+pub use normalize::normalize;
+pub use pricer::{Price, Pricer, PRICING_VERSION, PRICING_VERSION_KEY};

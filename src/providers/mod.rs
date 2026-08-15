@@ -11,7 +11,7 @@ mod source;
 
 pub use source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 
-use crate::core::model::Provider;
+use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
 pub fn all_providers() -> [Provider; 6] {
@@ -23,6 +23,20 @@ pub fn default_configs() -> Vec<ProviderConfig> {
     Provider::ALL
         .into_iter()
         .map(ProviderConfig::for_provider)
+        .collect()
+}
+
+/// Build scan configs from the user's provider selection (order + enabled
+/// flags).
+pub fn configs_for(selection: &ProviderSelection) -> Vec<ProviderConfig> {
+    selection
+        .entries
+        .iter()
+        .map(|e| ProviderConfig {
+            provider: e.provider,
+            enabled: e.enabled,
+            ..ProviderConfig::default()
+        })
         .collect()
 }
 

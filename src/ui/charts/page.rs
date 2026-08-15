@@ -2,9 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use gpui::{
-    div, px, AnyElement, Context, Hsla, IntoElement, ParentElement, Styled, Window,
-};
+use gpui::{div, px, AnyElement, Context, Hsla, IntoElement, ParentElement, Styled, Window};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{v_flex, ActiveTheme, StyledExt};
 
@@ -59,10 +57,8 @@ pub fn render_page(
         .iter()
         .position(|k| *k == app.state.charts.kind)
         .unwrap_or(0);
-    let provider_ix = Provider::ALL
-        .iter()
-        .position(|pr| *pr == provider)
-        .unwrap_or(0);
+    let providers = app.state.provider_selection.enabled();
+    let provider_ix = providers.iter().position(|pr| *pr == provider).unwrap_or(0);
 
     page_shell(cx, "图表统计", "按应用 / 模型 / 日期的 Token 用量趋势")
         .child(
@@ -90,7 +86,8 @@ pub fn render_page(
                         .children(ChartMetric::ALL.iter().map(|m| Tab::new().label(m.label())))
                         .on_click(move |ix, _, cx| {
                             if let Some(m) = ChartMetric::ALL.get(*ix) {
-                                let _ = weak.update(cx, |this, cx| this.select_chart_metric(*m, cx));
+                                let _ =
+                                    weak.update(cx, |this, cx| this.select_chart_metric(*m, cx));
                             }
                         })
                 })
@@ -113,13 +110,17 @@ pub fn render_page(
                         .segmented()
                         .selected_index(provider_ix)
                         .children(
-                            Provider::ALL
+                            providers
                                 .iter()
                                 .map(|pr| Tab::new().label(pr.display_name())),
                         )
-                        .on_click(move |ix, _, cx| {
-                            if let Some(pr) = Provider::ALL.get(*ix) {
-                                let _ = weak.update(cx, |this, cx| this.select_chart_provider(*pr, cx));
+                        .on_click({
+                            let providers = providers.clone();
+                            move |ix, _, cx| {
+                                if let Some(pr) = providers.get(*ix) {
+                                    let _ = weak
+                                        .update(cx, |this, cx| this.select_chart_provider(*pr, cx));
+                                }
                             }
                         })
                 }),
@@ -175,13 +176,19 @@ fn model_section(
             } else {
                 match kind {
                     ChartKind::Line => line_chart(&ms, colors, metric, "chart-model-line"),
-                    ChartKind::Bar => model_bar_chart(&snap.model_series, metric, "chart-model-bar"),
+                    ChartKind::Bar => {
+                        model_bar_chart(&snap.model_series, metric, "chart-model-bar")
+                    }
                 }
             }
         }
         None => empty_hint("加载中…", p.muted_foreground),
     };
-    chart_card(cx, &format!("按模型（{}）", provider.display_name()), content)
+    chart_card(
+        cx,
+        &format!("按模型（{}）", provider.display_name()),
+        content,
+    )
 }
 
 fn chart_card(cx: &Context<RTokenApp>, title: &str, body: AnyElement) -> AnyElement {
@@ -192,12 +199,7 @@ fn chart_card(cx: &Context<RTokenApp>, title: &str, body: AnyElement) -> AnyElem
         .border_color(p.border)
         .p_3()
         .gap_2()
-        .child(
-            div()
-                .font_semibold()
-                .text_sm()
-                .child(title.to_string()),
-        )
+        .child(div().font_semibold().text_sm().child(title.to_string()))
         .child(div().h(px(320.0)).child(body))
         .into_any_element()
 }
@@ -304,7 +306,12 @@ fn formatter_for(metric: ChartMetric) -> fn(f64) -> String {
 }
 
 /// Multi-series line chart with compact-formatted value labels.
-fn line_chart(ms: &MultiSeries, colors: &[Hsla], metric: ChartMetric, id: &'static str) -> AnyElement {
+fn line_chart(
+    ms: &MultiSeries,
+    colors: &[Hsla],
+    metric: ChartMetric,
+    id: &'static str,
+) -> AnyElement {
     let series = ms
         .series
         .iter()

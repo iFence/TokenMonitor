@@ -28,6 +28,7 @@ pub fn run() -> anyhow::Result<()> {
                     title: Some("rToken".into()),
                     ..Default::default()
                 }),
+                window_min_size: Some(size(px(800.0), px(600.0))),
                 ..Default::default()
             },
             move |window, cx| {

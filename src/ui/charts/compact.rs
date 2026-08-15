@@ -42,7 +42,11 @@ pub struct LineSeries {
 
 impl LineSeries {
     pub fn new(name: String, values: Vec<f64>, color: Hsla) -> Self {
-        Self { name, values, color }
+        Self {
+            name,
+            values,
+            color,
+        }
     }
 }
 
@@ -105,7 +109,12 @@ impl Plot for CompactLineChart {
                 })
             })
             .collect();
-        let x_labels = point_x_labels(&self.x, &x_scale, self.tick_margin, cx.theme().muted_foreground);
+        let x_labels = point_x_labels(
+            &self.x,
+            &x_scale,
+            self.tick_margin,
+            cx.theme().muted_foreground,
+        );
 
         let axis = PlotAxis::new()
             .stroke(cx.theme().border)
@@ -115,7 +124,10 @@ impl Plot for CompactLineChart {
             .y_label_side(AxisLabelSide::Start)
             .y_label(y_labels);
 
-        let grid_ys: Vec<Pixels> = ticks.iter().filter_map(|t| y_scale.tick(t).map(px)).collect();
+        let grid_ys: Vec<Pixels> = ticks
+            .iter()
+            .filter_map(|t| y_scale.tick(t).map(px))
+            .collect();
         Grid::new()
             .y(grid_ys)
             .stroke(cx.theme().border)
@@ -178,7 +190,11 @@ impl Plot for CompactLineChart {
             })
             .collect();
 
-        Some(TooltipState::new(index, point(px(x_tick), position.y), dots))
+        Some(TooltipState::new(
+            index,
+            point(px(x_tick), position.y),
+            dots,
+        ))
     }
 
     fn tooltip(
@@ -197,8 +213,7 @@ impl Plot for CompactLineChart {
         let mut tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
             .cross_line(
-                CrossLine::new(state.cross_line)
-                    .height(bounds.size.height.as_f32() - AXIS_GAP),
+                CrossLine::new(state.cross_line).height(bounds.size.height.as_f32() - AXIS_GAP),
             )
             .dots(
                 state
@@ -274,8 +289,13 @@ impl Plot for CompactBarChart {
                 })
             })
             .collect();
-        let x_labels =
-            band_x_labels(&self.x, &band_scale, band_width, 1, cx.theme().muted_foreground);
+        let x_labels = band_x_labels(
+            &self.x,
+            &band_scale,
+            band_width,
+            1,
+            cx.theme().muted_foreground,
+        );
 
         let axis = PlotAxis::new()
             .stroke(cx.theme().border)
@@ -285,7 +305,10 @@ impl Plot for CompactBarChart {
             .y_label_side(AxisLabelSide::Start)
             .y_label(y_labels);
 
-        let grid_ys: Vec<Pixels> = ticks.iter().filter_map(|t| y_scale.tick(t).map(px)).collect();
+        let grid_ys: Vec<Pixels> = ticks
+            .iter()
+            .filter_map(|t| y_scale.tick(t).map(px))
+            .collect();
         Grid::new()
             .y(grid_ys)
             .stroke(cx.theme().border)
@@ -368,7 +391,11 @@ impl Plot for CompactBarChart {
                 .gap(px(8.))
                 .cross_line(cross_line)
                 .title(title)
-                .row(cx.theme().chart_2, SharedString::default(), (self.formatter)(value))
+                .row(
+                    cx.theme().chart_2,
+                    SharedString::default(),
+                    (self.formatter)(value),
+                )
                 .into_any_element(),
         )
     }
@@ -436,7 +463,8 @@ fn band_x_labels(
                 return None;
             }
             scale.tick(label).map(|t| {
-                AxisText::new(label.clone(), px(t + band_width / 2.), color).align(TextAlign::Center)
+                AxisText::new(label.clone(), px(t + band_width / 2.), color)
+                    .align(TextAlign::Center)
             })
         })
         .collect()

@@ -5,6 +5,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 use crate::core::model::Provider;
+use crate::core::pricing::Pricer;
 use crate::core::usage::UsageRecord;
 use crate::providers::{ProviderError, ProviderSource};
 use crate::storage::repository::{BatchInsertStats, ProjectRepo, SettingsRepo, UsageRepo};
@@ -83,6 +84,18 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
     let output = match source.scan(&mut |r| {
         records += 1;
         projects.insert(r.project.clone());
+        // Pricing is the "later pipeline stage" the adapters defer to: resolve
+        // the model against the embedded price table and stamp `cost_micros`
+        // before the row is dedup-inserted.
+        let mut r = r;
+        r.usage.cost_micros = Pricer::global().cost_micros(
+            r.provider,
+            &r.usage.model,
+            r.usage.input_tokens,
+            r.usage.output_tokens,
+            r.usage.cache_read_tokens,
+            r.usage.cache_write_tokens,
+        );
         batch.push(r);
         if batch.len() >= INSERT_BATCH {
             if flush_err.is_none() {

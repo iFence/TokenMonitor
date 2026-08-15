@@ -182,11 +182,7 @@ impl ProviderSource for ClaudeSource {
     }
 
     fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
-        let dirs: Vec<PathBuf> = self
-            .existing_roots()
-            .into_iter()
-            .map(|r| r.dir)
-            .collect();
+        let dirs: Vec<PathBuf> = self.existing_roots().into_iter().map(|r| r.dir).collect();
         if dirs.is_empty() {
             Err(ProviderError::DataDirNotFound(Provider::Claude))
         } else {

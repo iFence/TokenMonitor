@@ -39,20 +39,13 @@ pub fn render_topbar(
         .border_b_1()
         .border_color(p.border)
         .child(
-            v_flex()
-                .child(
-                    div()
-                        .text_lg()
-                        .font_bold()
-                        .text_color(p.foreground)
-                        .child("rToken"),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(p.muted_foreground)
-                        .child("AI 编程工具 Token 用量追踪"),
-                ),
+            v_flex().child(
+                div()
+                    .text_lg()
+                    .font_bold()
+                    .text_color(p.foreground)
+                    .child("rToken"),
+            ),
         )
         .child(
             h_flex()

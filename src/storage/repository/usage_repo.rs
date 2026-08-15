@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::core::aggregation::SumStats;
 use crate::core::model::{Provider, TimeWindow, Usage};
+use crate::core::pricing::Pricer;
 use crate::core::usage::UsageRecord;
 
 /// Outcome of a dedup batch insert.
@@ -88,6 +89,55 @@ impl<'a> UsageRepo<'a> {
         }
         tx.commit()?;
         Ok(stats)
+    }
+
+    /// Recompute `cost_micros` for every row against the current price table.
+    /// Returns the number of rows updated. One-time backfill: only `(id, cost)`
+    /// pairs are held in memory (never full records), and the writes are
+    /// batched so a crash mid-pass is safely re-run next start.
+    pub fn recompute_all_costs(&self, pricer: &Pricer) -> Result<u64> {
+        const BATCH: usize = 2000;
+
+        let mut costs: Vec<(i64, u64)> = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, provider, model, input_tokens, output_tokens,
+                        cache_read_tokens, cache_write_tokens
+                 FROM usage_records",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let provider_id: String = row.get("provider")?;
+                let provider =
+                    Provider::from_id(&provider_id).ok_or_else(|| sqlite_error(&provider_id))?;
+                let model: String = row.get("model")?;
+                let cost = pricer.cost_micros(
+                    provider,
+                    &model,
+                    row.get::<_, i64>("input_tokens")? as u64,
+                    row.get::<_, i64>("output_tokens")? as u64,
+                    row.get::<_, i64>("cache_read_tokens")? as u64,
+                    row.get::<_, i64>("cache_write_tokens")? as u64,
+                );
+                Ok((row.get::<_, i64>("id")?, cost))
+            })?;
+            for row in rows {
+                costs.push(row?);
+            }
+        }
+
+        let mut updated = 0u64;
+        for chunk in costs.chunks(BATCH) {
+            let tx = self.conn.unchecked_transaction()?;
+            {
+                let mut stmt =
+                    tx.prepare("UPDATE usage_records SET cost_micros = ?1 WHERE id = ?2")?;
+                for (id, cost) in chunk {
+                    updated += stmt.execute(params![*cost as i64, *id])? as u64;
+                }
+            }
+            tx.commit()?;
+        }
+        Ok(updated)
     }
 
     pub fn find_by_fingerprint(&self, fingerprint: &str) -> Result<Option<UsageRecord>> {
@@ -244,12 +294,15 @@ impl<'a> UsageRepo<'a> {
                    GROUP BY model, date(started_at, '+8 hours')
                    ORDER BY model, date(started_at, '+8 hours')";
         let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(params![p.id(), w.start.to_rfc3339(), w.end.to_rfc3339()], |row| {
-            let model: String = row.get(0)?;
-            let day: String = row.get(1)?;
-            let stats = sum_stats_from_row_at(row, 2)?;
-            Ok((model, day, stats))
-        })?;
+        let rows = stmt.query_map(
+            params![p.id(), w.start.to_rfc3339(), w.end.to_rfc3339()],
+            |row| {
+                let model: String = row.get(0)?;
+                let day: String = row.get(1)?;
+                let stats = sum_stats_from_row_at(row, 2)?;
+                Ok((model, day, stats))
+            },
+        )?;
         let mut map: BTreeMap<String, Vec<(String, SumStats)>> = BTreeMap::new();
         for r in rows {
             let (model, day, stats) = r?;
@@ -293,7 +346,8 @@ impl<'a> UsageRepo<'a> {
             let key: String = row.get(0)?;
             Ok((key, sum_stats_from_row(row)?))
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     /// Shared `GROUP BY <group_sql>` aggregate; returns keys + stats sorted by
