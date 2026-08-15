@@ -17,8 +17,8 @@ use crate::storage::sqlite;
 use crate::ui;
 
 use super::state::{
-    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus, TimeTab,
-    ViewSnapshot,
+    ActivePage, AppState, ChartKind, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus,
+    SettingsGroup, TimeTab, ViewSnapshot,
 };
 
 /// Periodic auto-rescan interval, matching tokei's 30-second refresh.
@@ -91,6 +91,12 @@ impl RTokenApp {
         if page == ActivePage::Charts {
             self.refresh_view(cx);
         }
+        cx.notify();
+    }
+
+    /// Switch the settings page group (left-hand navigation).
+    pub fn select_settings_group(&mut self, group: SettingsGroup, cx: &mut Context<Self>) {
+        self.state.settings_group = group;
         cx.notify();
     }
 

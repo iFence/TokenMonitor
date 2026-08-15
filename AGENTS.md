@@ -25,3 +25,31 @@ cargo test
 cargo run                # 涉及 UI 变更时
 cargo tree -d            # 确认只有一个 gpui / gpui-component git 来源（无 rev）
 ```
+
+## 提交规范（Angular）
+
+提交信息遵循 Angular 约定，一条提交只做一件事，格式为：
+
+```text
+<type>(<scope>): <subject>
+```
+
+- **type**（必选）：`feat`（新功能）、`fix`（修复）、`docs`（文档）、`style`（格式，不影响逻辑）、`refactor`（重构）、`perf`（性能）、`test`（测试）、`build`（构建/依赖）、`ci`（CI 配置）、`chore`（杂项）、`revert`（回滚）。
+- **scope**（可选）：改动范围，如 `ui`、`providers`、`storage`、`collector`。
+- **subject**：祈使句、小写开头、结尾不加句号、不超过 50 字符。
+- **body**（可选）：与 subject 之间空一行，说明「为什么」和「做了什么」，不写「怎么做的」。
+- **footer**（可选）：破坏性变更写 `BREAKING CHANGE: ...`，或关联 issue `Closes #123`。
+
+示例：
+
+```text
+feat(providers): add CodeBuddy adapter
+fix(ui): format chart values with compact M/亿 units
+refactor(storage): push aggregation into SQL
+```
+
+```text
+feat(providers): rename data_dir to data_dirs
+
+BREAKING CHANGE: ProviderSource::data_dir now returns a Vec.
+```

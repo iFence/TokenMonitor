@@ -61,6 +61,25 @@ impl TimeTab {
     }
 }
 
+/// Settings page group (left-hand navigation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsGroup {
+    #[default]
+    Applications,
+    About,
+}
+
+impl SettingsGroup {
+    pub const ALL: [SettingsGroup; 2] = [Self::Applications, Self::About];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Applications => "应用",
+            Self::About => "关于",
+        }
+    }
+}
+
 /// Status of the latest scan.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ScanStatus {
@@ -83,6 +102,7 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Default)]
 pub struct AppState {
     pub active_page: ActivePage,
+    pub settings_group: SettingsGroup,
     pub time_tab: TimeTab,
     pub expanded_provider: Option<Provider>,
     pub selected_project: Option<String>,
