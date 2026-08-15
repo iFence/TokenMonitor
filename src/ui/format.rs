@@ -19,6 +19,17 @@ pub fn format_cost_usd(micros: u64) -> String {
     format!("${:.2}", micros as f64 / 1e6)
 }
 
+/// Compact token count for chart `f64` values. Token counts are integral, so
+/// the truncating cast is lossless.
+pub fn format_tokens_compact_f64(v: f64) -> String {
+    format_tokens_compact(v as u64)
+}
+
+/// Cost in dollars (already converted from micros) → "$12.34".
+pub fn format_cost_f64(v: f64) -> String {
+    format!("${:.2}", v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -36,5 +47,12 @@ mod tests {
     fn cost_formats_usd() {
         assert_eq!(format_cost_usd(0), "$0.00");
         assert_eq!(format_cost_usd(317_490_000), "$317.49");
+    }
+
+    #[test]
+    fn f64_variants_match_u64() {
+        assert_eq!(format_tokens_compact_f64(9_100_000.0), "9.1M");
+        assert_eq!(format_tokens_compact_f64(350_000_000.0), "3.5亿");
+        assert_eq!(format_cost_f64(317.49), "$317.49");
     }
 }

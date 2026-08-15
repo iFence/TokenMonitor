@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use gpui::{
     div, px, AnyElement, Context, Hsla, IntoElement, ParentElement, Styled, Window,
 };
-use gpui_component::chart::{AreaChart, BarChart};
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{v_flex, ActiveTheme, StyledExt};
 
@@ -14,6 +13,8 @@ use crate::app::state::{ChartKind, ChartMetric, ChartRange, ChartsSnapshot};
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
 
+use super::compact::{CompactBarChart, CompactLineChart, LineSeries};
+use crate::ui::format::{format_cost_f64, format_tokens_compact_f64};
 use crate::ui::page_shell;
 
 /// Render-ready multi-series: a shared chronological x-domain with one value
@@ -28,12 +29,6 @@ struct NamedSeries {
 struct MultiSeries {
     days: Vec<String>,
     series: Vec<NamedSeries>,
-}
-
-/// One chart datum: an x label plus one y value per series.
-struct DayRow {
-    day: String,
-    values: Vec<f64>,
 }
 
 pub fn render_page(
@@ -153,8 +148,8 @@ fn main_section(
                 empty_hint("暂无数据", p.muted_foreground)
             } else {
                 match kind {
-                    ChartKind::Line => line_chart(&ms, colors, "chart-main-line"),
-                    ChartKind::Bar => daily_bar_chart(&ms, "chart-main-bar"),
+                    ChartKind::Line => line_chart(&ms, colors, metric, "chart-main-line"),
+                    ChartKind::Bar => daily_bar_chart(&ms, metric, "chart-main-bar"),
                 }
             }
         }
@@ -179,7 +174,7 @@ fn model_section(
                 empty_hint("暂无数据", p.muted_foreground)
             } else {
                 match kind {
-                    ChartKind::Line => line_chart(&ms, colors, "chart-model-line"),
+                    ChartKind::Line => line_chart(&ms, colors, metric, "chart-model-line"),
                     ChartKind::Bar => model_bar_chart(&snap.model_series, metric, "chart-model-bar"),
                 }
             }
@@ -299,46 +294,38 @@ fn align_model_series(
     MultiSeries { days, series }
 }
 
-/// Multi-series line chart (transparent area fill so only strokes show).
-fn line_chart(ms: &MultiSeries, colors: &[Hsla], id: &'static str) -> AnyElement {
-    let rows: Vec<DayRow> = ms
-        .days
+/// Value formatter chosen by metric: token counts get the compact M/亿/K
+/// treatment, cost is shown as dollars.
+fn formatter_for(metric: ChartMetric) -> fn(f64) -> String {
+    match metric {
+        ChartMetric::Cost => format_cost_f64,
+        _ => format_tokens_compact_f64,
+    }
+}
+
+/// Multi-series line chart with compact-formatted value labels.
+fn line_chart(ms: &MultiSeries, colors: &[Hsla], metric: ChartMetric, id: &'static str) -> AnyElement {
+    let series = ms
+        .series
         .iter()
         .enumerate()
-        .map(|(di, day)| DayRow {
-            day: day.clone(),
-            values: ms.series.iter().map(|s| s.values[di]).collect(),
-        })
+        .map(|(i, s)| LineSeries::new(s.name.clone(), s.values.clone(), colors[i % colors.len()]))
         .collect();
-
-    let mut chart = AreaChart::new(rows)
-        .x(|r: &DayRow| r.day.clone())
-        .tick_margin(3);
-    for (i, series) in ms.series.iter().enumerate() {
-        let color = colors[i % colors.len()];
-        chart = chart
-            .y(move |r: &DayRow| r.values[i])
-            .stroke(color)
-            .fill(gpui::transparent_black())
-            .name(series.name.clone());
-    }
-    chart.id(id).into_any_element()
+    CompactLineChart::new(ms.days.clone(), series, formatter_for(metric))
+        .tick_margin(3)
+        .id(id)
+        .into_any_element()
 }
 
 /// Single-series daily bar chart (sum across series for the shared day domain).
-fn daily_bar_chart(ms: &MultiSeries, id: &'static str) -> AnyElement {
-    let data: Vec<(String, f64)> = ms
+fn daily_bar_chart(ms: &MultiSeries, metric: ChartMetric, id: &'static str) -> AnyElement {
+    let values: Vec<f64> = ms
         .days
         .iter()
         .enumerate()
-        .map(|(di, day)| {
-            let total: f64 = ms.series.iter().map(|s| s.values[di]).sum();
-            (day.clone(), total)
-        })
+        .map(|(di, _)| ms.series.iter().map(|s| s.values[di]).sum())
         .collect();
-    BarChart::new(data)
-        .band(|(d, _)| d.clone())
-        .value(|(_, v)| *v)
+    CompactBarChart::new(ms.days.clone(), values, formatter_for(metric))
         .id(id)
         .into_any_element()
 }
@@ -349,7 +336,7 @@ fn model_bar_chart(
     metric: ChartMetric,
     id: &'static str,
 ) -> AnyElement {
-    let data: Vec<(String, f64)> = model_series
+    let mut data: Vec<(String, f64)> = model_series
         .iter()
         .map(|(model, series)| {
             let total = series.iter().fold(SumStats::default(), |mut acc, (_, s)| {
@@ -359,9 +346,10 @@ fn model_bar_chart(
             (model.clone(), metric_value(metric, total))
         })
         .collect();
-    BarChart::new(data)
-        .band(|(m, _)| m.clone())
-        .value(|(_, v)| *v)
+    // Sort by value descending so the largest model reads left to right.
+    data.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let (x, values): (Vec<String>, Vec<f64>) = data.into_iter().unzip();
+    CompactBarChart::new(x, values, formatter_for(metric))
         .id(id)
         .into_any_element()
 }

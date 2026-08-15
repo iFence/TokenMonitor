@@ -1,5 +1,6 @@
 //! GPUI-drawn chart components.
 
+mod compact;
 mod donut_chart;
 pub mod page;
 
