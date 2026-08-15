@@ -10,6 +10,7 @@ use gpui_component::{h_flex, v_flex};
 use crate::app::app::RTokenApp;
 use crate::app::state::TimeTab;
 use crate::core::aggregation::SumStats;
+use crate::core::model::Provider;
 
 use super::card::provider_card;
 
@@ -60,39 +61,69 @@ fn tab_bar(app: &RTokenApp, cx: &Context<RTokenApp>) -> impl IntoElement {
         )
 }
 
-/// Two-column grid of provider cards over the enabled providers in selection
-/// order (zero-usage providers included).
+/// Two-column masonry of provider cards. Cards keep their natural height and
+/// are dropped into the currently-shorter column, so a short (no-data) card
+/// fills the vertical gap left by a taller neighbor instead of a rigid row grid
+/// that stretches every card to its row's tallest card.
 fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoElement {
     let tab_label = app.state.time_tab.label();
     let providers = app.state.provider_selection.enabled();
+
+    // Greedy masonry: assign each card to the shorter column, using a height
+    // hint so cards with a per-model section balance across both columns.
+    let mut columns: [Vec<(Provider, SumStats)>; 2] = [Vec::new(), Vec::new()];
+    let mut column_heights = [0u64, 0u64];
+    for provider in providers {
+        let stats = app
+            .state
+            .by_provider
+            .iter()
+            .find(|(p, _)| *p == provider)
+            .map(|(_, s)| *s)
+            .unwrap_or_default();
+        let models = app.state.by_provider_model.get(&provider);
+        let column = if column_heights[0] <= column_heights[1] { 0 } else { 1 };
+        column_heights[column] += card_height_hint(models);
+        columns[column].push((provider, stats));
+    }
+
     v_flex()
         .id("dashboard-grid")
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
         .p_4()
-        .gap_4()
-        .children(providers.chunks(2).map(|row| {
+        .child(
             h_flex()
+                .items_start()
                 .gap_4()
-                .children(row.iter().map(|provider| {
-                    let stats = app
-                        .state
-                        .by_provider
-                        .iter()
-                        .find(|(p, _)| p == provider)
-                        .map(|(_, s)| s.clone())
-                        .unwrap_or_else(SumStats::default);
-                    provider_card(
-                        cx,
-                        app.weak_self.clone(),
-                        *provider,
-                        stats,
-                        app.state.by_provider_model.get(provider),
-                        app.state.expanded_provider == Some(*provider),
-                        tab_label,
-                    )
-                }))
-                .into_any_element()
-        }))
+                .children(columns.iter().filter(|c| !c.is_empty()).map(|column| {
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_4()
+                        .children(column.iter().map(|(provider, stats)| {
+                            provider_card(
+                                cx,
+                                app.weak_self.clone(),
+                                *provider,
+                                *stats,
+                                app.state.by_provider_model.get(provider),
+                                app.state.expanded_provider == Some(*provider),
+                                tab_label,
+                            )
+                        }))
+                })),
+        )
+}
+
+/// Rough relative height of a card, used only to balance the masonry columns.
+/// Cards carrying a per-model breakdown are noticeably taller than empty ones;
+/// the expanded list is ignored so toggling it never reflows a card columns.
+fn card_height_hint(models: Option<&Vec<(String, SumStats)>>) -> u64 {
+    if models.is_some_and(|m| !m.is_empty()) {
+        2
+    } else {
+        1
+    }
 }

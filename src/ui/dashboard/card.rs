@@ -28,7 +28,7 @@ pub fn provider_card(
     let has_usage = stats.records > 0;
 
     v_flex()
-        .flex_1()
+        .w_full()
         .p_4()
         .gap_3()
         .rounded(p.radius)
