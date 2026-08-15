@@ -1,5 +1,7 @@
 # rToken
 
+![release](https://img.shields.io/github/v/release/iFence/rToken?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/rToken/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/rToken?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/rToken?style=flat-square)
+
 一个基于 **Rust + GPUI** 的 AI 编程工具 **Token 用量追踪**桌面应用。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、CodeBuddy、OpenCode、Qoder）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
 
 > 灵感与聚合/展示形式参考 [tokei](https://github.com/cclank/tokei)（按类别分组、排序、带合计的汇总表）。
