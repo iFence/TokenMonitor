@@ -25,6 +25,7 @@ use super::state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus,
     SettingsGroup, TimeTab, ViewSnapshot,
 };
+use super::update_check::UpdateCheckUiState;
 
 /// Periodic auto-rescan interval, matching tokei's 30-second refresh.
 const SCAN_INTERVAL: Duration = Duration::from_secs(30);
@@ -44,6 +45,10 @@ pub struct RTokenApp {
     pub chart_metric_select: Entity<SelectState<Vec<ChartMetric>>>,
     pub chart_app_select: Entity<SelectState<Vec<ChartApp>>>,
     pub chart_range_picker: Entity<DatePickerState>,
+    /// Auto-update state and preferences.
+    pub update_check: UpdateCheckUiState,
+    pub check_updates_on_startup: bool,
+    pub skipped_update_version: Option<String>,
 }
 
 impl RTokenApp {
@@ -56,6 +61,8 @@ impl RTokenApp {
         let (view_tx, view_rx) = unbounded();
 
         let selection = collector.selection();
+        let check_updates_on_startup = collector.check_updates_on_startup();
+        let skipped_update_version = collector.skipped_update_version();
 
         // Stateful dropdown / date-picker entities live for the app's lifetime;
         // recreating them each render would reset open state on every notify.
@@ -69,9 +76,8 @@ impl RTokenApp {
         });
         let mut chart_app_options = vec![ChartApp::All];
         chart_app_options.extend(selection.enabled().into_iter().map(ChartApp::One));
-        let chart_app_select = cx.new(|cx| {
-            SelectState::new(chart_app_options, Some(IndexPath::default()), window, cx)
-        });
+        let chart_app_select = cx
+            .new(|cx| SelectState::new(chart_app_options, Some(IndexPath::default()), window, cx));
         let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
         let mut app = RTokenApp {
@@ -86,6 +92,9 @@ impl RTokenApp {
             chart_metric_select,
             chart_app_select,
             chart_range_picker,
+            update_check: UpdateCheckUiState::default(),
+            check_updates_on_startup,
+            skipped_update_version,
         };
         app.state.provider_selection = selection;
         app.sync_chart_app_select(window, cx);
@@ -206,7 +215,11 @@ impl RTokenApp {
         end: NaiveDate,
         cx: &mut Context<Self>,
     ) {
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         self.state.charts.custom_range = Some((start, end));
         self.refresh_view(cx);
         cx.notify();

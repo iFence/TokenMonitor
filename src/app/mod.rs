@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod app;
 pub mod state;
+pub mod update_check;
 
 pub use actions::Quit;
 pub use app::RTokenApp;
@@ -10,6 +11,8 @@ pub use state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
     ScanStatus, TimeTab, ViewSnapshot,
 };
+
+use std::sync::Arc;
 
 use gpui::{px, size, App, AppContext, Bounds, WindowBounds, WindowOptions};
 use gpui_component::Root;
@@ -20,6 +23,13 @@ pub fn run() -> anyhow::Result<()> {
     application.run(move |cx: &mut App| {
         gpui_component::init(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
+        // GitHub release check + installer download go through this client.
+        let http_client = reqwest_client::ReqwestClient::user_agent(concat!(
+            "rToken/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .expect("failed to initialize rToken HTTP client");
+        cx.set_http_client(Arc::new(http_client));
         let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
         cx.open_window(
             WindowOptions {
@@ -33,6 +43,7 @@ pub fn run() -> anyhow::Result<()> {
             },
             move |window, cx| {
                 let view = cx.new(|cx| RTokenApp::new(window, cx));
+                view.update(cx, |app, cx| app.maybe_check_for_updates_on_startup(cx));
                 cx.new(|cx| Root::new(view, window, cx).bordered(false))
             },
         )

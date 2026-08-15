@@ -22,6 +22,10 @@ use scanner::{scan_all, scan_one, ScanSummary};
 /// Settings key holding the JSON-encoded [`ProviderSelection`].
 const PROVIDER_SELECTION_KEY: &str = "providers.selection";
 
+/// Settings keys for the auto-update preferences.
+const CHECK_UPDATES_ON_STARTUP_KEY: &str = "update.check_on_startup";
+const SKIPPED_UPDATE_VERSION_KEY: &str = "update.skipped_version";
+
 /// Events the collector emits to the app.
 #[derive(Debug, Clone)]
 pub enum CollectorEvent {
@@ -143,6 +147,43 @@ impl Collector {
         *self.sources.write().expect("sources lock poisoned") = sources;
         *self.selection.write().expect("selection lock poisoned") = selection;
         Ok(())
+    }
+
+    /// Whether to check for updates on startup (defaults to `true`).
+    pub fn check_updates_on_startup(&self) -> bool {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn)
+            .get(CHECK_UPDATES_ON_STARTUP_KEY)
+            .ok()
+            .flatten()
+            .map(|value| value == "true")
+            .unwrap_or(true)
+    }
+
+    pub fn set_check_updates_on_startup(&self, enabled: bool) -> Result<()> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn).set(
+            CHECK_UPDATES_ON_STARTUP_KEY,
+            if enabled { "true" } else { "false" },
+        )
+    }
+
+    /// The update version the user last chose to skip, if any.
+    pub fn skipped_update_version(&self) -> Option<String> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn)
+            .get(SKIPPED_UPDATE_VERSION_KEY)
+            .ok()
+            .flatten()
+    }
+
+    pub fn set_skipped_update_version(&self, version: Option<&str>) -> Result<()> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        let repo = SettingsRepo::new(&conn);
+        match version {
+            Some(version) => repo.set(SKIPPED_UPDATE_VERSION_KEY, version),
+            None => repo.remove(SKIPPED_UPDATE_VERSION_KEY),
+        }
     }
 }
 

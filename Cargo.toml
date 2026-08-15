@@ -35,6 +35,9 @@ async-channel = "2.5"
 # Returns freed memory to the OS on Windows; keeps RSS from parking at the
 # allocator's high-water mark after scans / view refreshes.
 mimalloc = "0.1"
+# Update check: version comparison + async HTTP for the GitHub releases API.
+semver = "1"
+futures = "0.3"
 
 # GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
 # 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。
@@ -42,6 +45,9 @@ gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+# 与 gpui 共用同一 git source（Cargo.lock 锁定同一 rev，勿加 rev=）。
+http_client = { git = "https://github.com/zed-industries/zed" }
+reqwest_client = { git = "https://github.com/zed-industries/zed" }
 
 [dev-dependencies]
 tempfile = "3"

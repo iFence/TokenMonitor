@@ -22,3 +22,14 @@ pub fn open_path_in_explorer(path: &Path) -> Result<()> {
         .context("spawn explorer.exe")?;
     Ok(())
 }
+
+/// Launch a downloaded Windows installer (an `.msi`) through the Windows
+/// Installer wizard. Spawns and returns immediately so the app can quit.
+pub fn launch_installer(path: &Path) -> Result<()> {
+    std::process::Command::new("msiexec.exe")
+        .arg("/i")
+        .arg(path)
+        .spawn()
+        .context("spawn msiexec")?;
+    Ok(())
+}
