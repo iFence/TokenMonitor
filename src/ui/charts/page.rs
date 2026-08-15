@@ -64,14 +64,11 @@ pub fn render_page(
                     let weak = weak.clone();
                     let range_tab = TabBar::new("charts-range")
                         .segmented()
-                        .children(
-                            ChartRange::ALL.iter().map(|r| Tab::new().label(r.label())),
-                        )
+                        .children(ChartRange::ALL.iter().map(|r| Tab::new().label(r.label())))
                         .on_click(move |ix, window, cx| {
                             if let Some(r) = ChartRange::ALL.get(*ix) {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.select_chart_range(*r, window, cx)
-                                });
+                                let _ = weak
+                                    .update(cx, |this, cx| this.select_chart_range(*r, window, cx));
                             }
                         });
                     // While a custom range is active, no preset is highlighted.
@@ -83,13 +80,11 @@ pub fn render_page(
                 })
                 .child(seg_label(p.muted_foreground, "自定义"))
                 .child(
-                    div()
-                        .w(px(240.0))
-                        .child(
-                            DatePicker::new(&range_picker)
-                                .cleanable(true)
-                                .placeholder("请选择日期"),
-                        ),
+                    div().w(px(240.0)).child(
+                        DatePicker::new(&range_picker)
+                            .cleanable(true)
+                            .placeholder("请选择日期"),
+                    ),
                 )
                 .child(seg_label(p.muted_foreground, "指标"))
                 .child(div().w(px(140.0)).child(Select::new(&metric_select)))
@@ -334,7 +329,10 @@ fn daily_bar_chart(
     id: &'static str,
 ) -> AnyElement {
     let days: Vec<String> = daily.iter().map(|(d, _)| d.clone()).collect();
-    let values: Vec<f64> = daily.iter().map(|(_, s)| metric_value(metric, *s)).collect();
+    let values: Vec<f64> = daily
+        .iter()
+        .map(|(_, s)| metric_value(metric, *s))
+        .collect();
     CompactBarChart::new(days, values, formatter_for(metric))
         .id(id)
         .into_any_element()
@@ -363,7 +361,12 @@ fn model_list(
                 .gap_2()
                 .pb_1()
                 .child(div().text_xs().text_color(p.muted_foreground).child("模型"))
-                .child(div().text_xs().text_color(p.muted_foreground).child(metric.label())),
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(p.muted_foreground)
+                        .child(metric.label()),
+                ),
         )
         .children(totals.iter().enumerate().map(|(i, (model, stats))| {
             let value = metric_value(metric, *stats);

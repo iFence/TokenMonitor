@@ -82,7 +82,11 @@ fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoEleme
             .map(|(_, s)| *s)
             .unwrap_or_default();
         let models = app.state.by_provider_model.get(&provider);
-        let column = if column_heights[0] <= column_heights[1] { 0 } else { 1 };
+        let column = if column_heights[0] <= column_heights[1] {
+            0
+        } else {
+            1
+        };
         column_heights[column] += card_height_hint(models);
         columns[column].push((provider, stats));
     }
@@ -93,28 +97,25 @@ fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoEleme
         .min_h_0()
         .overflow_y_scroll()
         .p_4()
-        .child(
-            h_flex()
-                .items_start()
-                .gap_4()
-                .children(columns.iter().filter(|c| !c.is_empty()).map(|column| {
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .gap_4()
-                        .children(column.iter().map(|(provider, stats)| {
-                            provider_card(
-                                cx,
-                                app.weak_self.clone(),
-                                *provider,
-                                *stats,
-                                app.state.by_provider_model.get(provider),
-                                app.state.expanded_provider == Some(*provider),
-                                tab_label,
-                            )
-                        }))
-                })),
-        )
+        .child(h_flex().items_start().gap_4().children(
+            columns.iter().filter(|c| !c.is_empty()).map(|column| {
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_4()
+                    .children(column.iter().map(|(provider, stats)| {
+                        provider_card(
+                            cx,
+                            app.weak_self.clone(),
+                            *provider,
+                            *stats,
+                            app.state.by_provider_model.get(provider),
+                            app.state.expanded_provider == Some(*provider),
+                            tab_label,
+                        )
+                    }))
+            }),
+        ))
 }
 
 /// Rough relative height of a card, used only to balance the masonry columns.

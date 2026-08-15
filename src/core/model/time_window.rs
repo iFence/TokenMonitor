@@ -106,7 +106,11 @@ impl TimeWindow {
     /// calendar dates (both endpoints inclusive). `start > end` is swapped so
     /// the window is never inverted.
     pub fn custom(start: NaiveDate, end: NaiveDate) -> Self {
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         let start_utc = east8_to_utc(start.and_hms_opt(0, 0, 0).expect("midnight is valid"));
         let end_utc = east8_to_utc(
             (end + Duration::days(1))
