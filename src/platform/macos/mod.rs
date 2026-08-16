@@ -23,3 +23,5 @@ pub fn open_path_in_explorer(_path: &Path) -> Result<()> {
 pub fn launch_installer(_path: &Path) -> Result<()> {
     Err(anyhow!("launch_installer not implemented on macOS yet"))
 }
+
+pub fn apply_dark_titlebar() {}

@@ -38,7 +38,7 @@ pub fn run() -> anyhow::Result<()> {
                     title: Some("rToken".into()),
                     ..Default::default()
                 }),
-                window_min_size: Some(size(px(800.0), px(600.0))),
+                window_min_size: Some(size(px(600.0), px(600.0))),
                 ..Default::default()
             },
             move |window, cx| {
@@ -48,6 +48,9 @@ pub fn run() -> anyhow::Result<()> {
             },
         )
         .expect("failed to open rToken window");
+        // Keep the native titlebar dark to match the dark panels, independent
+        // of the OS light/dark theme. No-op on non-Windows platforms.
+        crate::platform::apply_dark_titlebar();
         cx.activate(true);
     });
     Ok(())
