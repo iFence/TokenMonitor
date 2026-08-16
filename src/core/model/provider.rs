@@ -60,7 +60,7 @@ impl Provider {
             Provider::OpenCode => "OpenCode",
             Provider::Qoder => "Qoder",
             Provider::OpenClaw => "OpenClaw",
-            Provider::DeepSeek => "DeepSeek",
+            Provider::DeepSeek => "DeepSeek Harness",
         }
     }
 
