@@ -3,6 +3,7 @@
 pub mod claude;
 pub mod codebuddy;
 pub mod codex;
+pub mod deepseek;
 pub mod gemini;
 pub mod openclaw;
 pub mod opencode;
@@ -15,7 +16,7 @@ pub use source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
-pub fn all_providers() -> [Provider; 7] {
+pub fn all_providers() -> [Provider; 8] {
     Provider::ALL
 }
 
@@ -67,6 +68,9 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             }
             Provider::OpenClaw => {
                 Box::new(openclaw::OpenClawSource::new(c.clone())) as Box<dyn ProviderSource>
+            }
+            Provider::DeepSeek => {
+                Box::new(deepseek::DeepSeekSource::new(c.clone())) as Box<dyn ProviderSource>
             }
         })
         .collect()

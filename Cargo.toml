@@ -38,6 +38,8 @@ mimalloc = "0.1"
 # Update check: version comparison + async HTTP for the GitHub releases API.
 semver = "1"
 futures = "0.3"
+# DeepSeek harness writes `~/.dsh/sessions/**/*.jsonl.zstd`; streaming decoder.
+zstd = "0.13"
 
 # GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
 # 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。

@@ -280,7 +280,7 @@ fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
                 .text_sm()
                 .text_color(p.muted_foreground)
                 .child(
-                    "本地运行的 AI 编程工具 Token 用量追踪桌面应用，聚合展示 Claude Code、Codex、Gemini CLI、CodeBuddy、OpenCode、Qoder 的用量与成本。",
+                    "本地运行的 AI 编程工具 Token 用量追踪桌面应用，聚合展示 Claude Code、Codex、Gemini CLI、CodeBuddy、OpenCode、OpenClaw、Qoder、DeepSeek 的用量与成本。",
                 ),
         )
         .child(

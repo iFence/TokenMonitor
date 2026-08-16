@@ -14,6 +14,7 @@
   - `codebuddy`：`~/.codebuddy/projects/**/*.jsonl` 的 `message.usage`（已实现）
   - `opencode`：`~/.local/share/opencode/opencode.db`（SQLite）的 `message.data.tokens`（已实现）
   - `openclaw`：`~/.openclaw/agents/**/sessions/*.jsonl` 的 `message.usage`（已实现，兼容旧版 `~/.clawdbot`）
+  - `deepseek`：`~/.dsh/sessions/**/*.jsonl.zstd` 的 `assistant/message` 用量（已实现，zstd 解压，支持 WSL）
   - `gemini` / `qoder`：待实现（桩）
 - **SQLite 持久化**：用量记录（含 fingerprint 去重）、项目、配额、设置
 - **采集管线**：`scanner`（扫描解析）、`watcher`（文件监听）、`scheduler`（定时重扫）
