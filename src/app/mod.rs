@@ -30,7 +30,7 @@ pub fn run() -> anyhow::Result<()> {
         ))
         .expect("failed to initialize rToken HTTP client");
         cx.set_http_client(Arc::new(http_client));
-        let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1100.0), px(800.0)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

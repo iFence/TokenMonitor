@@ -4,7 +4,7 @@
 use gpui::SharedString;
 use gpui_component::searchable_list::SearchableListItem;
 
-use crate::app::state::{ChartApp, ChartMetric};
+use crate::app::state::{ChartApp, ChartMetric, ChartRange, ChartRangeItem};
 
 impl SearchableListItem for ChartMetric {
     type Value = ChartMetric;
@@ -27,5 +27,17 @@ impl SearchableListItem for ChartApp {
 
     fn value(&self) -> &Self::Value {
         self
+    }
+}
+
+impl SearchableListItem for ChartRangeItem {
+    type Value = ChartRange;
+
+    fn title(&self) -> SharedString {
+        self.title.clone().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.range
     }
 }

@@ -4,13 +4,13 @@ use std::collections::BTreeMap;
 
 use chrono::{Datelike, Duration, NaiveDate};
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, px, AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::date_picker::DatePicker;
 use gpui_component::select::Select;
-use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 
 use crate::app::app::RTokenApp;
@@ -28,10 +28,9 @@ pub fn render_page(
     cx: &mut Context<RTokenApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
-    let weak = app.weak_self.clone();
 
-    // Snapshot the state we render; controls dispatch via the weak handle, and
-    // the charts render from owned clones so no borrow outlives this frame.
+    // Snapshot the state we render; controls dispatch via their own entities,
+    // and the charts render from owned clones so no borrow outlives this frame.
     let data = app.state.charts.data.clone();
     let metric = app.state.charts.metric;
     let app_filter = app.state.charts.app;
@@ -39,14 +38,10 @@ pub fn render_page(
 
     let metric_select = app.chart_metric_select.clone();
     let app_select = app.chart_app_select.clone();
+    let range_select = app.chart_range_select.clone();
     let range_picker = app.chart_range_picker.clone();
-    let custom_active = app.state.charts.custom_range.is_some();
+    let custom_active = app.state.charts.range == ChartRange::Custom;
     let bucket = trend_bucket(&app.state.charts);
-
-    let range_ix = ChartRange::ALL
-        .iter()
-        .position(|r| *r == app.state.charts.range)
-        .unwrap_or(0);
 
     v_flex()
         .id("rtoken-charts-page")
@@ -60,32 +55,16 @@ pub fn render_page(
                 .items_center()
                 .flex_wrap()
                 .child(seg_label(p.muted_foreground, "时间范围"))
-                .child({
-                    let weak = weak.clone();
-                    let range_tab = TabBar::new("charts-range")
-                        .segmented()
-                        .children(ChartRange::ALL.iter().map(|r| Tab::new().label(r.label())))
-                        .on_click(move |ix, window, cx| {
-                            if let Some(r) = ChartRange::ALL.get(*ix) {
-                                let _ = weak
-                                    .update(cx, |this, cx| this.select_chart_range(*r, window, cx));
-                            }
-                        });
-                    // While a custom range is active, no preset is highlighted.
-                    if custom_active {
-                        range_tab
-                    } else {
-                        range_tab.selected_index(range_ix)
-                    }
+                .child(div().w(px(200.0)).child(Select::new(&range_select)))
+                .when(custom_active, |this| {
+                    this.child(
+                        div().w(px(240.0)).child(
+                            DatePicker::new(&range_picker)
+                                .cleanable(true)
+                                .placeholder("请选择日期"),
+                        ),
+                    )
                 })
-                .child(seg_label(p.muted_foreground, "自定义"))
-                .child(
-                    div().w(px(240.0)).child(
-                        DatePicker::new(&range_picker)
-                            .cleanable(true)
-                            .placeholder("请选择日期"),
-                    ),
-                )
                 .child(seg_label(p.muted_foreground, "指标"))
                 .child(div().w(px(140.0)).child(Select::new(&metric_select)))
                 .child(seg_label(p.muted_foreground, "应用"))
@@ -118,6 +97,9 @@ fn trend_bucket(charts: &ChartsState) -> Bucket {
             ChartRange::Last7 => 7,
             ChartRange::Last30 => 30,
             ChartRange::ThisYear => 366,
+            // Custom without a chosen range yet: fall back to the placeholder
+            // last-7-day window.
+            ChartRange::Custom => 7,
         }
     };
     if days <= 14 {

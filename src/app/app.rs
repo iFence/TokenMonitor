@@ -22,8 +22,8 @@ use crate::storage::sqlite;
 use crate::ui;
 
 use super::state::{
-    ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ScanStatus,
-    SettingsGroup, TimeTab, ViewSnapshot,
+    ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartRangeItem, ChartsSnapshot,
+    ScanStatus, SettingsGroup, TimeTab, ViewSnapshot,
 };
 use super::update_check::UpdateCheckUiState;
 
@@ -44,6 +44,7 @@ pub struct RTokenApp {
     /// Stateful dropdown / date-picker entities for the charts page controls.
     pub chart_metric_select: Entity<SelectState<Vec<ChartMetric>>>,
     pub chart_app_select: Entity<SelectState<Vec<ChartApp>>>,
+    pub chart_range_select: Entity<SelectState<Vec<ChartRangeItem>>>,
     pub chart_range_picker: Entity<DatePickerState>,
     /// Auto-update state and preferences.
     pub update_check: UpdateCheckUiState,
@@ -78,6 +79,14 @@ impl RTokenApp {
         chart_app_options.extend(selection.enabled().into_iter().map(ChartApp::One));
         let chart_app_select = cx
             .new(|cx| SelectState::new(chart_app_options, Some(IndexPath::default()), window, cx));
+        let chart_range_select = cx.new(|cx| {
+            SelectState::new(
+                ChartRangeItem::all(),
+                Some(IndexPath::default()),
+                window,
+                cx,
+            )
+        });
         let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
         let mut app = RTokenApp {
@@ -91,6 +100,7 @@ impl RTokenApp {
             view_seq: 0,
             chart_metric_select,
             chart_app_select,
+            chart_range_select,
             chart_range_picker,
             update_check: UpdateCheckUiState::default(),
             check_updates_on_startup,
@@ -127,17 +137,32 @@ impl RTokenApp {
             .detach();
         }
         {
+            let range_select = app.chart_range_select.clone();
+            cx.subscribe_in(
+                &range_select,
+                window,
+                |this, _, ev: &SelectEvent<Vec<ChartRangeItem>>, window, cx| {
+                    if let SelectEvent::Confirm(Some(range)) = ev {
+                        this.select_chart_range(*range, window, cx);
+                    }
+                },
+            )
+            .detach();
+        }
+        {
             let picker = app.chart_range_picker.clone();
             cx.subscribe_in(
                 &picker,
                 window,
-                |this, _, ev: &DatePickerEvent, _, cx| match ev {
+                |this, _, ev: &DatePickerEvent, window, cx| match ev {
                     DatePickerEvent::Change(Date::Range(Some(start), Some(end))) => {
-                        this.select_chart_custom_range(*start, *end, cx);
+                        this.select_chart_custom_range(*start, *end, window, cx);
                     }
                     DatePickerEvent::Change(Date::Range(_, _)) => {
-                        // Cleared: fall back to the preset range.
+                        // Cleared: no custom dates picked yet; the placeholder
+                        // window takes over until a new range is chosen.
                         this.state.charts.custom_range = None;
+                        this.sync_chart_range_select(window, cx);
                         this.refresh_view(cx);
                         cx.notify();
                     }
@@ -201,10 +226,16 @@ impl RTokenApp {
     ) {
         self.state.charts.range = range;
         self.state.charts.custom_range = None;
-        self.chart_range_picker.update(cx, |picker, cx| {
-            picker.set_date(Date::Range(None, None), window, cx);
-        });
-        self.refresh_view(cx);
+        if range != ChartRange::Custom {
+            // Preset: clear the picker and re-query immediately. Selecting
+            // "自定义" only reveals the picker; the chart keeps its current
+            // data until a range is actually chosen.
+            self.chart_range_picker.update(cx, |picker, cx| {
+                picker.set_date(Date::Range(None, None), window, cx);
+            });
+            self.refresh_view(cx);
+        }
+        self.sync_chart_range_select(window, cx);
         cx.notify();
     }
 
@@ -213,6 +244,7 @@ impl RTokenApp {
         &mut self,
         start: NaiveDate,
         end: NaiveDate,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let (start, end) = if start <= end {
@@ -221,6 +253,7 @@ impl RTokenApp {
             (end, start)
         };
         self.state.charts.custom_range = Some((start, end));
+        self.sync_chart_range_select(window, cx);
         self.refresh_view(cx);
         cx.notify();
     }
@@ -316,6 +349,17 @@ impl RTokenApp {
         );
         let selected = self.state.charts.app;
         self.chart_app_select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
+            select.set_selected_value(&selected, window, cx);
+        });
+    }
+
+    /// Rebuild the charts time-range dropdown from the current selection,
+    /// refreshing the "自定义" item's title to show the chosen dates.
+    fn sync_chart_range_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let options = self.state.charts.range_options();
+        let selected = self.state.charts.range;
+        self.chart_range_select.update(cx, |select, cx| {
             select.set_items(options, window, cx);
             select.set_selected_value(&selected, window, cx);
         });

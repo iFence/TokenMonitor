@@ -117,33 +117,60 @@ pub struct AppState {
     pub charts: ChartsState,
 }
 
-/// Charts page time range (a UI concept, not persisted).
+/// Charts page time range (a UI concept, not persisted). `Custom` is the
+/// sentinel that opens the date-range picker; the chosen dates are stored in
+/// [`ChartsState::custom_range`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChartRange {
     #[default]
     Last7,
     Last30,
     ThisYear,
+    Custom,
 }
 
 impl ChartRange {
-    pub const ALL: [ChartRange; 3] = [Self::Last7, Self::Last30, Self::ThisYear];
+    pub const ALL: [ChartRange; 4] = [Self::Last7, Self::Last30, Self::ThisYear, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Last7 => "近7天",
             Self::Last30 => "近30天",
             Self::ThisYear => "本年",
+            Self::Custom => "自定义",
         }
     }
 
-    /// Window for this range, measured in East-8 calendar days.
+    /// Window for this range, measured in East-8 calendar days. `Custom` has
+    /// no fixed window of its own; it is overridden by `custom_range`.
     pub fn window(self, now: DateTime<Utc>) -> TimeWindow {
         match self {
             Self::Last7 => TimeWindow::last_n_days(7, now),
             Self::Last30 => TimeWindow::last_n_days(30, now),
             Self::ThisYear => TimeWindow::current_year(now),
+            Self::Custom => TimeWindow::last_n_days(7, now),
         }
+    }
+}
+
+/// A time-range dropdown item: a stable [`ChartRange`] value paired with a
+/// display title that can reflect the selected custom dates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartRangeItem {
+    pub range: ChartRange,
+    pub title: String,
+}
+
+impl ChartRangeItem {
+    /// The four range options with their default (preset) titles.
+    pub fn all() -> Vec<Self> {
+        ChartRange::ALL
+            .iter()
+            .map(|&range| Self {
+                range,
+                title: range.label().to_string(),
+            })
+            .collect()
     }
 }
 
@@ -229,6 +256,26 @@ impl ChartsState {
         } else {
             self.range.window(now)
         }
+    }
+
+    /// Dropdown options for the time-range selector. The `Custom` item's title
+    /// shows the selected dates once a custom range is chosen, so the trigger
+    /// reflects the active window.
+    pub fn range_options(&self) -> Vec<ChartRangeItem> {
+        ChartRange::ALL
+            .iter()
+            .map(|&range| ChartRangeItem {
+                range,
+                title: if range == ChartRange::Custom {
+                    match self.custom_range {
+                        Some((start, end)) => format!("{} ~ {}", start, end),
+                        None => range.label().to_string(),
+                    }
+                } else {
+                    range.label().to_string()
+                },
+            })
+            .collect()
     }
 }
 
