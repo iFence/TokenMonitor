@@ -287,14 +287,6 @@ fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
                 .child(format!("版本 {}", env!("CARGO_PKG_VERSION"))),
         )
         .child(
-            div()
-                .text_sm()
-                .text_color(p.muted_foreground)
-                .child(
-                    "本地运行的 AI 编程工具 Token 用量追踪桌面应用，聚合展示 Claude Code、Codex、Gemini CLI、CodeBuddy、OpenCode、OpenClaw、Qoder、DeepSeek Harness 的用量与成本。",
-                ),
-        )
-        .child(
             v_flex()
                 .gap_2()
                 .pt_3()

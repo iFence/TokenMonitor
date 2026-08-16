@@ -82,6 +82,7 @@
             Schedule='afterInstallInitialize'
             DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
 
+        <Icon Id='rtokenICO' SourceFile='resources\rtoken.ico'/>
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='rtoken Installation'/>
 
@@ -121,7 +122,34 @@
                                 Source='$(var.CargoTargetBinDir)\rtoken-app.exe'
                                 KeyPath='yes'/>
                         </Component>
+                        <Component Id='AppPath' Guid='*'>
+                            <RegistryValue Root='HKLM'
+                                Key='SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\rtoken-app.exe'
+                                Value='[#exe0]'
+                                Type='string'
+                                KeyPath='yes'/>
+                        </Component>
                     </Directory>
+                </Directory>
+            </Directory>
+
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='ApplicationProgramsFolder' Name='rToken'>
+                    <Component Id='ApplicationShortcut' Guid='*'>
+                        <Shortcut Id='ApplicationStartMenuShortcut'
+                            Name='rToken'
+                            Description='rToken - AI coding tool token usage tracker'
+                            Target='[#exe0]'
+                            WorkingDirectory='APPLICATIONFOLDER'
+                            Icon='rtokenICO'/>
+                        <RemoveFolder Id='ApplicationProgramsFolder' On='uninstall'/>
+                        <RegistryValue Root='HKCU'
+                            Key='Software\iFence\rToken'
+                            Name='installed'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes'/>
+                    </Component>
                 </Directory>
             </Directory>
         </Directory>
@@ -142,6 +170,8 @@
             <ComponentRef Id='License'/>
             
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='ApplicationShortcut'/>
+            <ComponentRef Id='AppPath'/>
 
             <Feature
                 Id='Environment'
