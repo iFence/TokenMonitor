@@ -147,6 +147,7 @@ fn applications_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyEl
 /// About panel: app name, version, description, and the auto-update controls.
 fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
     let p = crate::ui::palette(cx);
+    let portable = crate::platform::is_portable();
     let weak = app.weak_self.clone();
     let update = &app.update_check;
     let is_busy = update.is_busy();
@@ -184,6 +185,16 @@ fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
             .text_sm()
             .text_color(p.muted_foreground)
             .child("正在启动安装程序…")
+            .into_any_element(),
+        UpdateState::Downloaded {
+            latest_version,
+            file_name,
+        } => div()
+            .text_sm()
+            .text_color(p.muted_foreground)
+            .child(format!(
+                "便携版 v{latest_version} 已下载（{file_name}），请退出本程序后解压覆盖"
+            ))
             .into_any_element(),
         UpdateState::UpToDate => div()
             .text_sm()
@@ -303,7 +314,7 @@ fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
                         h_flex()
                             .gap_2()
                             .items_center()
-                            .child(download_install_button(&weak))
+                            .child(download_install_button(&weak, portable))
                             .child(skip_update_button(&weak)),
                     )
                 }),
@@ -321,10 +332,10 @@ fn check_updates_button(weak: &WeakEntity<RTokenApp>, busy: bool) -> Button {
         })
 }
 
-fn download_install_button(weak: &WeakEntity<RTokenApp>) -> Button {
+fn download_install_button(weak: &WeakEntity<RTokenApp>, portable: bool) -> Button {
     let weak = weak.clone();
     Button::new("about-download-install")
-        .label("下载并安装")
+        .label(if portable { "下载更新" } else { "下载并安装" })
         .primary()
         .on_click(move |_, _: &mut Window, cx: &mut App| {
             let _ = weak.update(cx, |this, cx| this.download_and_install(cx));

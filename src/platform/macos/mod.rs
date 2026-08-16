@@ -10,6 +10,10 @@ pub fn home_dir() -> Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow!("no home directory"))
 }
 
+pub fn is_portable() -> bool {
+    false
+}
+
 pub fn open_path_in_explorer(_path: &Path) -> Result<()> {
     Err(anyhow!(
         "open_path_in_explorer not implemented on macOS yet"

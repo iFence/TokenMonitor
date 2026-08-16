@@ -13,6 +13,12 @@ use semver::Version;
 use super::app::RTokenApp;
 
 const RELEASES_LATEST_URL: &str = "https://api.github.com/repos/iFence/rToken/releases/latest";
+const DEFAULT_BRANCH: &str = "main";
+const CHANGELOG_FILENAME: &str = "Changelog.md";
+
+fn changelog_url() -> String {
+    format!("https://raw.githubusercontent.com/iFence/rToken/{DEFAULT_BRANCH}/{CHANGELOG_FILENAME}")
+}
 
 #[derive(Debug, Clone)]
 pub enum UpdateState {
@@ -29,6 +35,12 @@ pub enum UpdateState {
         total_bytes: Option<u64>,
     },
     Installing,
+    /// Portable build only: the zip was saved next to the running exe and the
+    /// containing folder was opened in Explorer for the user to extract over.
+    Downloaded {
+        latest_version: Version,
+        file_name: String,
+    },
     UpToDate,
     Error(String),
 }
@@ -85,12 +97,19 @@ struct GithubRelease {
     prerelease: bool,
 }
 
-/// Select the Windows installer asset (the `.msi` produced by the release
-/// workflow).
-fn select_asset(assets: &[GithubAsset]) -> Option<UpdateAsset> {
+/// Select the Windows update asset: the `.msi` installer for an installed
+/// build, or the portable `.zip` for a portable (免安装) build.
+fn select_asset(assets: &[GithubAsset], portable: bool) -> Option<UpdateAsset> {
+    let matches = |name: &str| {
+        if portable {
+            name.ends_with(".zip")
+        } else {
+            name.ends_with(".msi")
+        }
+    };
     assets
         .iter()
-        .find(|asset| asset.name.ends_with(".msi"))
+        .find(|asset| matches(&asset.name))
         .map(|asset| UpdateAsset {
             name: asset.name.clone(),
             url: asset.browser_download_url.clone(),
@@ -109,6 +128,96 @@ async fn fetch_text(client: &Arc<dyn HttpClient>, url: &str) -> anyhow::Result<S
     Ok(String::from_utf8(bytes)?)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChangelogEntry {
+    version: Version,
+    body: String,
+}
+
+/// Parse `## vX.Y.Z` sections out of `Changelog.md`.
+///
+/// - Headers are `## ` followed by `vX.Y.Z` (leading `v`/`V` optional).
+/// - A trailing date/token on the header line (e.g. `## v0.1.3 (2026-07-28)`)
+///   is ignored: only the first whitespace-delimited token after `## ` is parsed.
+/// - `---` separators and adjacent headers both cleanly terminate the previous entry.
+/// - Lines before the first recognized header are dropped.
+/// - A `## ` line whose token is not a version is treated as body content of the
+///   current section (so sub-headers inside a version block are preserved).
+fn parse_changelog(content: &str) -> Vec<ChangelogEntry> {
+    let mut entries = Vec::new();
+    let mut current: Option<(Version, String)> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("## ") {
+            let token = rest.split_whitespace().next().unwrap_or("");
+            let ver_str = token
+                .strip_prefix('v')
+                .or_else(|| token.strip_prefix('V'))
+                .unwrap_or(token);
+            if let Ok(version) = Version::parse(ver_str) {
+                if let Some((v, body)) = current.take() {
+                    entries.push(ChangelogEntry {
+                        version: v,
+                        body: body.trim_end().to_string(),
+                    });
+                }
+                current = Some((version, String::new()));
+            } else if let Some((_, body)) = current.as_mut() {
+                body.push_str(line);
+                body.push('\n');
+            }
+        } else if trimmed == "---" {
+            if let Some((v, body)) = current.take() {
+                entries.push(ChangelogEntry {
+                    version: v,
+                    body: body.trim_end().to_string(),
+                });
+            }
+        } else if let Some((_, body)) = current.as_mut() {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    if let Some((v, body)) = current.take() {
+        entries.push(ChangelogEntry {
+            version: v,
+            body: body.trim_end().to_string(),
+        });
+    }
+    entries
+}
+
+/// Return release notes for versions `current < v <= latest`, sorted descending,
+/// joined with a `---` separator. Falls back to `fallback_body` (the GitHub
+/// release body) when no matching entries are found.
+fn aggregate_release_notes(
+    entries: &[ChangelogEntry],
+    current: &Version,
+    latest: &Version,
+    fallback_body: Option<&str>,
+) -> String {
+    let mut matched: Vec<&ChangelogEntry> = entries
+        .iter()
+        .filter(|entry| entry.version > *current && entry.version <= *latest)
+        .collect();
+    matched.sort_by(|a, b| b.version.cmp(&a.version));
+
+    if matched.is_empty() {
+        return fallback_body
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default()
+            .to_string();
+    }
+
+    matched
+        .into_iter()
+        .map(|entry| format!("## v{}\n\n{}", entry.version, entry.body.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 struct UpdateInfo {
     latest_version: Version,
     release_notes: String,
@@ -119,6 +228,7 @@ struct UpdateInfo {
 async fn check_update(
     client: &Arc<dyn HttpClient>,
     current: &Version,
+    portable: bool,
 ) -> anyhow::Result<Option<UpdateInfo>> {
     let json = fetch_text(client, RELEASES_LATEST_URL).await?;
     let release: GithubRelease =
@@ -136,10 +246,21 @@ async fn check_update(
         return Ok(None);
     }
     let asset =
-        select_asset(&release.assets).context("no matching installer asset for platform")?;
+        select_asset(&release.assets, portable).context("no matching update asset for platform")?;
+    // Prefer the maintained Changelog (per-version release notes) over the
+    // auto-generated GitHub release body, which is often just a compare link.
+    let notes = match fetch_text(client, &changelog_url()).await {
+        Ok(content) => aggregate_release_notes(
+            &parse_changelog(&content),
+            current,
+            &latest,
+            release.body.as_deref(),
+        ),
+        Err(_) => release.body.clone().unwrap_or_default(),
+    };
     Ok(Some(UpdateInfo {
         latest_version: latest,
-        release_notes: release.body.clone().unwrap_or_default(),
+        release_notes: notes,
         asset,
     }))
 }
@@ -157,9 +278,10 @@ impl RTokenApp {
         let client = cx.http_client();
         let current =
             Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver");
+        let portable = crate::platform::is_portable();
 
         cx.spawn(async move |this, cx| {
-            let result = check_update(&client, &current).await;
+            let result = check_update(&client, &current, portable).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(Some(info)) => {
@@ -206,7 +328,10 @@ impl RTokenApp {
         }
     }
 
-    /// Download the installer for the currently-available update, launch it, and quit.
+    /// Download the update asset for the currently-available version. Installed
+    /// builds get the `.msi` (handed off to the installer, then the app quits);
+    /// portable builds get the `.zip` saved next to the running exe, with the
+    /// folder opened in Explorer for the user to extract over manually.
     pub fn download_and_install(&mut self, cx: &mut Context<Self>) {
         let (latest_version, asset) = match &self.update_check.state {
             UpdateState::Available {
@@ -226,7 +351,18 @@ impl RTokenApp {
         cx.notify();
 
         let client = cx.http_client();
-        let dest = std::env::temp_dir().join(&asset.name);
+        let portable = crate::platform::is_portable();
+        // Portable: save next to the running exe so the user can extract the
+        // zip over it; installed: save to temp and hand off to msiexec.
+        let dest = if portable {
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+                .unwrap_or_else(std::env::temp_dir)
+                .join(&asset.name)
+        } else {
+            std::env::temp_dir().join(&asset.name)
+        };
 
         cx.spawn(async move |this, cx| {
             let result: anyhow::Result<()> = async {
@@ -270,6 +406,18 @@ impl RTokenApp {
             .await;
 
             match result {
+                Ok(()) if portable => {
+                    let _ = this.update(cx, |this, cx| {
+                        if let Some(dir) = dest.parent() {
+                            let _ = crate::platform::open_path_in_explorer(dir);
+                        }
+                        this.update_check.state = UpdateState::Downloaded {
+                            latest_version: latest_version.clone(),
+                            file_name: asset.name.clone(),
+                        };
+                        cx.notify();
+                    });
+                }
                 Ok(()) => {
                     let _ = this.update(cx, |this, cx| {
                         this.update_check.state = UpdateState::Installing;
@@ -298,5 +446,100 @@ impl RTokenApp {
         }
         self.update_check.state = UpdateState::Idle;
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(major: u64, minor: u64, patch: u64) -> Version {
+        Version::new(major, minor, patch)
+    }
+
+    #[test]
+    fn parse_changelog_extracts_version_sections() {
+        let content =
+            "# Changelog\n\npreamble\n\n## v0.1.3\n\n- new feature\n\n## v0.1.2\n\n- initial\n";
+        let entries = parse_changelog(content);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].version, v(0, 1, 3));
+        assert_eq!(entries[1].version, v(0, 1, 2));
+        assert!(entries[0].body.contains("new feature"));
+        assert!(entries[1].body.contains("initial"));
+    }
+
+    #[test]
+    fn parse_changelog_handles_separator_and_adjacent_headers() {
+        let content = "## v0.1.3\nbody1\n---\n## v0.1.2\nbody2\n";
+        let entries = parse_changelog(content);
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].body.contains("body1"));
+        assert!(entries[1].body.contains("body2"));
+
+        let adjacent = "## v0.1.3\n## v0.1.2\nbody2\n";
+        let entries = parse_changelog(adjacent);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].version, v(0, 1, 3));
+        assert_eq!(entries[1].version, v(0, 1, 2));
+    }
+
+    #[test]
+    fn parse_changelog_drops_preamble_and_ignores_date() {
+        let content = "# Changelog\n\n约定：\n- foo\n\n## v0.1.2 (2026-07-28)\nbody\n";
+        let entries = parse_changelog(content);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].version, v(0, 1, 2));
+        assert!(entries[0].body.contains("body"));
+    }
+
+    #[test]
+    fn aggregate_release_notes_filters_sorts_and_falls_back() {
+        let entries = vec![
+            ChangelogEntry {
+                version: v(0, 1, 2),
+                body: "current".into(),
+            },
+            ChangelogEntry {
+                version: v(0, 1, 3),
+                body: "minor".into(),
+            },
+            ChangelogEntry {
+                version: v(0, 1, 4),
+                body: "latest".into(),
+            },
+        ];
+        let notes = aggregate_release_notes(&entries, &v(0, 1, 2), &v(0, 1, 4), None);
+        assert!(notes.contains("## v0.1.4"));
+        assert!(notes.contains("## v0.1.3"));
+        assert!(!notes.contains("## v0.1.2"));
+        let pos4 = notes.find("v0.1.4").unwrap();
+        let pos3 = notes.find("v0.1.3").unwrap();
+        assert!(pos4 < pos3);
+
+        // No matching entries → fall back to the release body.
+        let notes = aggregate_release_notes(&entries, &v(0, 1, 4), &v(0, 1, 5), Some("fallback"));
+        assert_eq!(notes, "fallback");
+    }
+
+    #[test]
+    fn select_asset_picks_zip_for_portable_and_msi_for_installed() {
+        let assets = vec![
+            GithubAsset {
+                name: "rtoken-v0.2.2-windows-x64.zip".into(),
+                browser_download_url: "https://example.com/portable.zip".into(),
+                size: 100,
+            },
+            GithubAsset {
+                name: "rtoken_0.2.2_x64_en-US.msi".into(),
+                browser_download_url: "https://example.com/installer.msi".into(),
+                size: 200,
+            },
+        ];
+        let portable = select_asset(&assets, true).expect("portable asset");
+        assert!(portable.name.ends_with(".zip"));
+
+        let installed = select_asset(&assets, false).expect("installer asset");
+        assert!(installed.name.ends_with(".msi"));
     }
 }

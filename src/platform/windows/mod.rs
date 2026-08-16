@@ -14,6 +14,19 @@ pub fn home_dir() -> Result<PathBuf> {
     dirs::home_dir().context("resolve home directory")
 }
 
+/// Whether the app is running from a portable (免安装) layout rather than an
+/// MSI install. The portable zip ships a `.portable` marker and `README.md`
+/// next to the exe; the MSI installs only the exe into `bin\`.
+pub fn is_portable() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(dir) = exe.parent() else {
+        return false;
+    };
+    dir.join(".portable").is_file() || dir.join("README.md").is_file()
+}
+
 /// Open a path in Windows Explorer.
 pub fn open_path_in_explorer(path: &Path) -> Result<()> {
     std::process::Command::new("explorer.exe")

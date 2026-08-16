@@ -47,6 +47,9 @@ jobs:
           Copy-Item "target/release/rtoken-app.exe" "$root/"
           Copy-Item "README.md" "$root/"
           Copy-Item "LICENSE" "$root/"
+          # Marker the app checks at runtime to detect a portable (免安装) layout
+          # and offer the portable zip instead of the MSI on update.
+          New-Item -ItemType File -Force -Path "$root/.portable" | Out-Null
           if (-not (Test-Path "$root/rtoken-app.exe")) {
             throw "rtoken-app.exe is missing from the portable bundle"
           }
