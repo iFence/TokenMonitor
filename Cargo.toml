@@ -1,13 +1,13 @@
 [package]
 name = "rtoken"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
 authors = ["iFence"]
 repository = "https://github.com/iFence/rToken"
 resolver = "2"
-description = "Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, CodeBuddy, OpenCode, Qoder)"
+description = "Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, CodeBuddy, OpenCode, OpenClaw, Qoder)"
 
 [lib]
 name = "rtoken"
