@@ -65,18 +65,75 @@ impl TimeTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsGroup {
     #[default]
+    General,
     Applications,
     About,
 }
 
 impl SettingsGroup {
-    pub const ALL: [SettingsGroup; 2] = [Self::Applications, Self::About];
+    pub const ALL: [SettingsGroup; 3] = [Self::General, Self::Applications, Self::About];
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::General => "通用",
             Self::Applications => "应用",
             Self::About => "关于",
         }
+    }
+}
+
+/// Periodic rescan interval options for the settings "General" group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScanInterval {
+    Secs30,
+    Min1,
+    #[default]
+    Min5,
+    Min15,
+    Min30,
+    Hour1,
+}
+
+impl ScanInterval {
+    pub const ALL: [ScanInterval; 6] = [
+        Self::Secs30,
+        Self::Min1,
+        Self::Min5,
+        Self::Min15,
+        Self::Min30,
+        Self::Hour1,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Secs30 => "30 秒",
+            Self::Min1 => "1 分钟",
+            Self::Min5 => "5 分钟",
+            Self::Min15 => "15 分钟",
+            Self::Min30 => "30 分钟",
+            Self::Hour1 => "1 小时",
+        }
+    }
+
+    pub fn seconds(self) -> u64 {
+        match self {
+            Self::Secs30 => 30,
+            Self::Min1 => 60,
+            Self::Min5 => 300,
+            Self::Min15 => 900,
+            Self::Min30 => 1800,
+            Self::Hour1 => 3600,
+        }
+    }
+
+    /// Map a persisted second count back to its option; unknown values fall
+    /// back to the 5-minute default.
+    pub fn from_seconds(secs: u64) -> Self {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|i| i.seconds() == secs)
+            .unwrap_or(Self::Min5)
     }
 }
 

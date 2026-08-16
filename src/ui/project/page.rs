@@ -4,6 +4,7 @@ use gpui_component::{h_flex, v_flex};
 
 use crate::app::app::RTokenApp;
 
+use crate::ui::format::format_tokens_compact;
 use crate::ui::page_shell;
 
 pub fn render_page(
@@ -14,7 +15,7 @@ pub fn render_page(
     let p = crate::ui::palette(cx);
     let rows = &app.state.by_project;
 
-    page_shell(cx, "Projects", "Token usage grouped by code project")
+    page_shell(cx, "Projects", "按代码项目分组的 Token 用量")
         .child(
             v_flex()
                 .rounded(p.radius)
@@ -36,7 +37,7 @@ pub fn render_page(
                             div()
                                 .w(px(140.0))
                                 .text_sm()
-                                .child(format!("{} tokens", s.total_tokens())),
+                                .child(format!("{} tokens", format_tokens_compact(s.total_tokens()))),
                         ])
                 }))
                 .when(rows.is_empty(), |this| {

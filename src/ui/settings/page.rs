@@ -2,16 +2,18 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement,
+    div, px, AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
+use gpui_component::searchable_list::SearchableListItem;
+use gpui_component::select::Select;
 use gpui_component::text::TextView;
 use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 
 use crate::app::app::RTokenApp;
-use crate::app::state::SettingsGroup;
+use crate::app::state::{ScanInterval, SettingsGroup};
 use crate::app::update_check::UpdateState;
 use crate::core::model::Provider;
 
@@ -83,9 +85,54 @@ fn group_content(
     cx: &mut Context<RTokenApp>,
 ) -> AnyElement {
     match group {
+        SettingsGroup::General => general_panel(app, cx),
         SettingsGroup::Applications => applications_panel(app, cx),
         SettingsGroup::About => about_panel(app, cx),
     }
+}
+
+/// General panel: app-wide behavior settings (rescan interval).
+fn general_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
+    let p = crate::ui::palette(cx);
+    let interval_select = app.scan_interval_select.clone();
+
+    v_flex()
+        .gap_2()
+        .p_3()
+        .rounded(p.radius)
+        .border_1()
+        .border_color(p.border)
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(p.foreground)
+                .child("通用"),
+        )
+        .child(
+            h_flex()
+                .gap_3()
+                .items_center()
+                .justify_between()
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(p.foreground)
+                                .child("扫描间隔"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(p.muted_foreground)
+                                .child("自动重新扫描数据的间隔；应用启动时会立即扫描一次。"),
+                        ),
+                )
+                .child(div().w(px(160.0)).child(Select::new(&interval_select))),
+        )
+        .into_any_element()
 }
 
 /// Panel listing every tracked app with a keep toggle and up/down reordering.
@@ -363,4 +410,16 @@ fn reorder_button(
         .on_click(move |_, window: &mut Window, cx: &mut App| {
             let _ = weak.update(cx, |this, cx| this.move_provider(provider, dir, window, cx));
         })
+}
+
+impl SearchableListItem for ScanInterval {
+    type Value = ScanInterval;
+
+    fn title(&self) -> SharedString {
+        self.label().into()
+    }
+
+    fn value(&self) -> &Self::Value {
+        self
+    }
 }

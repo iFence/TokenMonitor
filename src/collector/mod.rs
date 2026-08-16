@@ -26,6 +26,12 @@ const PROVIDER_SELECTION_KEY: &str = "providers.selection";
 const CHECK_UPDATES_ON_STARTUP_KEY: &str = "update.check_on_startup";
 const SKIPPED_UPDATE_VERSION_KEY: &str = "update.skipped_version";
 
+/// Settings key holding the periodic rescan interval, in seconds.
+const SCAN_INTERVAL_KEY: &str = "scan.interval_seconds";
+
+/// Default periodic rescan interval (5 minutes).
+pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 300;
+
 /// Events the collector emits to the app.
 #[derive(Debug, Clone)]
 pub enum CollectorEvent {
@@ -166,6 +172,22 @@ impl Collector {
             CHECK_UPDATES_ON_STARTUP_KEY,
             if enabled { "true" } else { "false" },
         )
+    }
+
+    /// The periodic rescan interval in seconds (defaults to 5 minutes).
+    pub fn scan_interval_seconds(&self) -> u64 {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn)
+            .get(SCAN_INTERVAL_KEY)
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_SCAN_INTERVAL_SECS)
+    }
+
+    pub fn set_scan_interval_seconds(&self, secs: u64) -> Result<()> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn).set(SCAN_INTERVAL_KEY, &secs.to_string())
     }
 
     /// The update version the user last chose to skip, if any.

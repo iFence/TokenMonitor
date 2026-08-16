@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_channel::{unbounded, Receiver, Sender};
 use chrono::{NaiveDate, Utc};
@@ -23,12 +23,9 @@ use crate::ui;
 
 use super::state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartRangeItem, ChartsSnapshot,
-    ScanStatus, SettingsGroup, TimeTab, ViewSnapshot,
+    ScanInterval, ScanStatus, SettingsGroup, TimeTab, ViewSnapshot,
 };
 use super::update_check::UpdateCheckUiState;
-
-/// Periodic auto-rescan interval, matching tokei's 30-second refresh.
-const SCAN_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Root application entity: owns app state, the collector, and the window focus.
 pub struct RTokenApp {
@@ -50,6 +47,10 @@ pub struct RTokenApp {
     pub update_check: UpdateCheckUiState,
     pub check_updates_on_startup: bool,
     pub skipped_update_version: Option<String>,
+    /// Periodic rescan interval (seconds), read live by the scheduler thread.
+    pub scan_interval: Arc<AtomicU64>,
+    /// Settings "General" dropdown for the rescan interval.
+    pub scan_interval_select: Entity<SelectState<Vec<ScanInterval>>>,
 }
 
 impl RTokenApp {
@@ -58,7 +59,9 @@ impl RTokenApp {
         window.focus(&focus_handle, cx);
         let db_path = default_db_path().expect("resolve app data dir");
         let collector = Arc::new(Collector::open(&db_path).expect("open collector"));
-        let scheduler = scheduler::start_scheduler(collector.clone(), SCAN_INTERVAL);
+        let scan_interval_secs = collector.scan_interval_seconds();
+        let scan_interval = Arc::new(AtomicU64::new(scan_interval_secs));
+        let scheduler = scheduler::start_scheduler(collector.clone(), scan_interval.clone());
         let (view_tx, view_rx) = unbounded();
 
         let selection = collector.selection();
@@ -88,6 +91,17 @@ impl RTokenApp {
             )
         });
         let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
+        let scan_interval_select = cx.new(|cx| {
+            SelectState::new(
+                ScanInterval::ALL.to_vec(),
+                Some(IndexPath::default()),
+                window,
+                cx,
+            )
+        });
+        scan_interval_select.update(cx, |select, cx| {
+            select.set_selected_value(&ScanInterval::from_seconds(scan_interval_secs), window, cx);
+        });
 
         let mut app = RTokenApp {
             state: AppState::default(),
@@ -105,6 +119,8 @@ impl RTokenApp {
             update_check: UpdateCheckUiState::default(),
             check_updates_on_startup,
             skipped_update_version,
+            scan_interval,
+            scan_interval_select,
         };
         app.state.provider_selection = selection;
         app.sync_chart_app_select(window, cx);
@@ -172,6 +188,20 @@ impl RTokenApp {
             .detach();
         }
 
+        {
+            let interval_select = app.scan_interval_select.clone();
+            cx.subscribe_in(
+                &interval_select,
+                window,
+                |this, _, ev: &SelectEvent<Vec<ScanInterval>>, _, cx| {
+                    if let SelectEvent::Confirm(Some(interval)) = ev {
+                        this.select_scan_interval(*interval, cx);
+                    }
+                },
+            )
+            .detach();
+        }
+
         app.spawn_event_loop(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
         app.refresh_view(cx); // async: returns immediately, fills state in background
@@ -189,6 +219,16 @@ impl RTokenApp {
                 self.state.last_error = None;
             }
             Err(e) => self.state.last_error = Some(format!("failed to start scan: {e}")),
+        }
+        cx.notify();
+    }
+
+    /// Update the periodic rescan interval: persist it and signal the scheduler
+    /// thread so the new value takes effect on its next cycle.
+    pub fn select_scan_interval(&mut self, interval: ScanInterval, cx: &mut Context<Self>) {
+        self.scan_interval.store(interval.seconds(), Ordering::Relaxed);
+        if let Err(e) = self.collector.set_scan_interval_seconds(interval.seconds()) {
+            self.state.last_error = Some(format!("save scan interval: {e}"));
         }
         cx.notify();
     }

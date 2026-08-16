@@ -61,6 +61,7 @@ pub(crate) fn page_shell(cx: &Context<RTokenApp>, title: &str, subtitle: &str) -
         .id("rtoken-page")
         .flex_1()
         .min_w_0()
+        .min_h_0()
         .overflow_y_scroll()
         .p_4()
         .gap_4()
