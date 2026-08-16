@@ -15,12 +15,13 @@ pub fn render_page(
     let p = crate::ui::palette(cx);
     let rows = &app.state.by_project;
 
-    page_shell(cx, "Projects", "按代码项目分组的 Token 用量")
+    page_shell(cx, "项目", "按代码项目分组的 Token 用量")
         .child(
             v_flex()
                 .rounded(p.radius)
                 .border_1()
                 .border_color(p.border)
+                .flex_shrink_0()
                 .overflow_hidden()
                 .children(rows.iter().map(|(project, s)| {
                     h_flex()
