@@ -15,6 +15,7 @@ pub enum Provider {
     Codebuddy,
     OpenCode,
     Qoder,
+    OpenClaw,
 }
 
 impl std::fmt::Display for Provider {
@@ -24,13 +25,14 @@ impl std::fmt::Display for Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 6] = [
+    pub const ALL: [Provider; 7] = [
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
         Provider::Codebuddy,
         Provider::OpenCode,
         Provider::Qoder,
+        Provider::OpenClaw,
     ];
 
     /// Stable lowercase identifier, used as the DB provider column and serde tag.
@@ -42,6 +44,7 @@ impl Provider {
             Provider::Codebuddy => "codebuddy",
             Provider::OpenCode => "opencode",
             Provider::Qoder => "qoder",
+            Provider::OpenClaw => "openclaw",
         }
     }
 
@@ -53,6 +56,7 @@ impl Provider {
             Provider::Codebuddy => "CodeBuddy",
             Provider::OpenCode => "OpenCode",
             Provider::Qoder => "Qoder",
+            Provider::OpenClaw => "OpenClaw",
         }
     }
 

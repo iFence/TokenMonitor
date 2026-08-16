@@ -4,6 +4,7 @@ pub mod claude;
 pub mod codebuddy;
 pub mod codex;
 pub mod gemini;
+pub mod openclaw;
 pub mod opencode;
 pub mod qoder;
 mod roots;
@@ -14,7 +15,7 @@ pub use source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
-pub fn all_providers() -> [Provider; 6] {
+pub fn all_providers() -> [Provider; 7] {
     Provider::ALL
 }
 
@@ -63,6 +64,9 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             }
             Provider::Qoder => {
                 Box::new(qoder::QoderSource::new(c.clone())) as Box<dyn ProviderSource>
+            }
+            Provider::OpenClaw => {
+                Box::new(openclaw::OpenClawSource::new(c.clone())) as Box<dyn ProviderSource>
             }
         })
         .collect()
