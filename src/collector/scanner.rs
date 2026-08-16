@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::core::model::Provider;
 use crate::core::pricing::Pricer;
 use crate::core::usage::UsageRecord;
-use crate::providers::{ProviderError, ProviderSource};
+use crate::providers::{FileStates, ProviderError, ProviderSource};
 use crate::storage::repository::{BatchInsertStats, ProjectRepo, SettingsRepo, UsageRepo};
 
 /// Records are buffered into batches of this size before the dedup insert, so
@@ -72,6 +72,15 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
         }
     }
 
+    // Per-file state from the last successful scan: lets the adapter skip
+    // parsing files whose (mtime, size) hasn't changed since then. Corrupt or
+    // absent state degrades to a full scan, never to missed data.
+    let files_key = format!("scan.files.{}", source.provider().id());
+    let known: FileStates = settings
+        .get(&files_key)?
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+
     // Stream records out of the provider, dedup-inserting in bounded batches
     // instead of accumulating the whole scan before writing.
     let usage_repo = UsageRepo::new(conn);
@@ -81,7 +90,7 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
     let mut records: u64 = 0;
     let mut flush_err: Option<anyhow::Error> = None;
 
-    let output = match source.scan(&mut |r| {
+    let output = match source.scan_incremental(&mut |r| {
         records += 1;
         projects.insert(r.project.clone());
         // Pricing is the "later pipeline stage" the adapters defer to: resolve
@@ -109,7 +118,7 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
             }
             batch.clear();
         }
-    }) {
+    }, &known) {
         Ok(o) => o,
         // Tool not installed on this machine — not an error.
         Err(ProviderError::DataDirNotFound(_)) => return Ok(summary),
@@ -135,6 +144,15 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
     for name in projects {
         project_repo.upsert(&name, &PathBuf::new(), &[source.provider()])?;
         summary.projects.push(name);
+    }
+
+    // Persist the fresh per-file state before the fingerprint: if a crash lands
+    // between the two, the stale fingerprint forces a rescan on the next start
+    // (safe — it only redoes work, never misses data).
+    if let Some(states) = &output.file_states {
+        if let Ok(json) = serde_json::to_string(states) {
+            settings.set(&files_key, &json)?;
+        }
     }
 
     if let Some(fp) = &fingerprint {

@@ -11,7 +11,7 @@ pub mod qoder;
 mod roots;
 mod source;
 
-pub use source::{ProviderConfig, ProviderError, ProviderSource, ScanOutput};
+pub use source::{FileStates, ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 
 use crate::core::model::{Provider, ProviderSelection};
 

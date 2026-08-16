@@ -405,6 +405,7 @@ impl ProviderSource for DeepSeekSource {
             found_files,
             fingerprint: fingerprint(found_files, max_mtime, total_bytes),
             errors,
+            ..Default::default()
         })
     }
 

@@ -426,6 +426,7 @@ impl ProviderSource for OpenClawSource {
             found_files,
             fingerprint: fingerprint(found_files, max_mtime, total_bytes),
             errors,
+            ..Default::default()
         })
     }
 

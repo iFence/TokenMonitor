@@ -12,8 +12,8 @@ use crate::core::usage::UsageRecord;
 
 use super::roots::discover_roots;
 use super::source::{
-    for_each_line, roots_fingerprint, scan_roots, ProviderConfig, ProviderError, ProviderSource,
-    ScanOutput, ScanRoot,
+    for_each_line, roots_fingerprint, scan_roots_incremental, FileStates, ProviderConfig,
+    ProviderError, ProviderSource, ScanOutput, ScanRoot,
 };
 
 /// Minimal view of a Claude Code JSONL line. Only the fields we aggregate are
@@ -191,21 +191,31 @@ impl ProviderSource for ClaudeSource {
     }
 
     fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
+        self.scan_incremental(emit, &FileStates::new())
+    }
+
+    fn scan_incremental(
+        &self,
+        emit: &mut dyn FnMut(UsageRecord),
+        known: &FileStates,
+    ) -> Result<ScanOutput, ProviderError> {
         let roots = self.existing_roots();
         if roots.is_empty() {
             return Err(ProviderError::DataDirNotFound(Provider::Claude));
         }
         let mut errors = Vec::new();
-        let (found_files, fingerprint) = scan_roots(
+        let (found_files, fingerprint, file_states) = scan_roots_incremental(
             &roots,
             &self.config,
             emit,
             &mut errors,
             &mut |path, rel, file_emit| Self::parse_file(path, rel, file_emit),
+            known,
         );
         Ok(ScanOutput {
             found_files,
             fingerprint,
+            file_states: Some(file_states),
             errors,
         })
     }

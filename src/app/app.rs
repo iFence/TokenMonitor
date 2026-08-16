@@ -38,6 +38,8 @@ pub struct RTokenApp {
     view_tx: Sender<ViewSnapshot>,
     view_rx: Receiver<ViewSnapshot>,
     view_seq: u64,
+    /// Highest snapshot seq applied so far; snapshots older than this are stale.
+    applied_seq: u64,
     /// Stateful dropdown / date-picker entities for the charts page controls.
     pub chart_metric_select: Entity<SelectState<Vec<ChartMetric>>>,
     pub chart_app_select: Entity<SelectState<Vec<ChartApp>>>,
@@ -112,6 +114,7 @@ impl RTokenApp {
             view_tx,
             view_rx,
             view_seq: 0,
+            applied_seq: 0,
             chart_metric_select,
             chart_app_select,
             chart_range_select,
@@ -427,15 +430,28 @@ impl RTokenApp {
     fn handle_collector_event(&mut self, event: CollectorEvent, cx: &mut Context<Self>) {
         match event {
             CollectorEvent::ScanStarted { .. } => {
-                self.state.scan_status = ScanStatus::Scanning {
-                    completed: 0,
-                    total: self.collector.sources().len() as u32,
+                // Each provider reports its own ScanStarted; keep the running
+                // completed count instead of resetting it on every provider.
+                let total = self.collector.sources().len() as u32;
+                let completed = match self.state.scan_status {
+                    ScanStatus::Scanning { completed, .. } => completed,
+                    _ => 0,
                 };
+                self.state.scan_status = ScanStatus::Scanning { completed, total };
             }
             CollectorEvent::ScanCompleted { summary } => {
-                self.state.scan_status = ScanStatus::Done {
-                    records: summary.records,
-                    at: Utc::now(),
+                let total = self.collector.sources().len() as u32;
+                let completed = match self.state.scan_status {
+                    ScanStatus::Scanning { completed, .. } => completed + 1,
+                    _ => 1,
+                };
+                self.state.scan_status = if completed >= total {
+                    ScanStatus::Done {
+                        records: summary.records,
+                        at: Utc::now(),
+                    }
+                } else {
+                    ScanStatus::Scanning { completed, total }
                 };
                 // Unchanged scans (fingerprint matched) have no new data; skip
                 // the re-query + re-render so idle polls stay near-free.
@@ -484,9 +500,14 @@ impl RTokenApp {
     }
 
     fn apply_snapshot(&mut self, snap: ViewSnapshot, cx: &mut Context<Self>) {
-        if snap.seq != self.view_seq {
-            return; // stale: a newer request superseded this one
+        // Apply monotonically: skip only snapshots older than one already
+        // applied. This lets intermediate per-provider refreshes stream into the
+        // UI during a scan, instead of every result being dropped in favor of
+        // the single latest request.
+        if snap.seq < self.applied_seq {
+            return; // stale: superseded by a newer applied snapshot
         }
+        self.applied_seq = snap.seq;
         self.state.summary = snap.summary;
         self.state.by_provider = snap.by_provider;
         self.state.by_provider_model = snap.by_provider_model;

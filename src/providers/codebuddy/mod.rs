@@ -23,8 +23,8 @@ use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
 use super::source::{
-    dir_fingerprint, for_each_line, scan_jsonl_dir, ProviderConfig, ProviderError, ProviderSource,
-    ScanOutput,
+    dir_fingerprint, for_each_line, scan_jsonl_dir_incremental, FileStates, ProviderConfig,
+    ProviderError, ProviderSource, ScanOutput,
 };
 
 /// Minimal view of a CodeBuddy session line. One all-optional shape covers every
@@ -186,18 +186,28 @@ impl ProviderSource for CodebuddySource {
     }
 
     fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
+        self.scan_incremental(emit, &FileStates::new())
+    }
+
+    fn scan_incremental(
+        &self,
+        emit: &mut dyn FnMut(UsageRecord),
+        known: &FileStates,
+    ) -> Result<ScanOutput, ProviderError> {
         let dir = self.data_dir()?;
         let mut errors = Vec::new();
-        let (found_files, fingerprint) = scan_jsonl_dir(
+        let (found_files, fingerprint, file_states) = scan_jsonl_dir_incremental(
             &dir,
             &self.config,
             emit,
             &mut errors,
             &mut |path, rel, file_emit| Self::parse_file(path, rel, file_emit),
+            known,
         );
         Ok(ScanOutput {
             found_files,
             fingerprint,
+            file_states: Some(file_states),
             errors,
         })
     }
