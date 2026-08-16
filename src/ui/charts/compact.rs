@@ -52,8 +52,12 @@ impl CompactBarChart {
     }
 
     fn y_scale(&self, plot_h: f32) -> ScaleLinear<f64> {
-        let domain: Vec<f64> = self.values.iter().copied().chain(Some(0.0)).collect();
-        ScaleLinear::new(domain, vec![plot_h, 10.0])
+        // Anchor the scale's upper bound to the highest "nice" tick rather than
+        // the raw data max. `nice_ticks` rounds up past `max`, so a data-max
+        // domain makes the top tick extrapolate above the plot area and overlap
+        // the controls above the chart.
+        let top = nice_ticks(self.max()).last().copied().unwrap_or(0.0);
+        ScaleLinear::new(vec![0.0, top], vec![plot_h, 10.0])
     }
 }
 

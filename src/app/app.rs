@@ -51,6 +51,9 @@ pub struct RTokenApp {
     pub skipped_update_version: Option<String>,
     /// Periodic rescan interval (seconds), read live by the scheduler thread.
     pub scan_interval: Arc<AtomicU64>,
+    /// Wakes the scheduler thread when the interval changes so the new value
+    /// takes effect immediately instead of after the old cycle elapses.
+    scheduler_wake: std::sync::mpsc::Sender<()>,
     /// Settings "General" dropdown for the rescan interval.
     pub scan_interval_select: Entity<SelectState<Vec<ScanInterval>>>,
 }
@@ -63,7 +66,9 @@ impl RTokenApp {
         let collector = Arc::new(Collector::open(&db_path).expect("open collector"));
         let scan_interval_secs = collector.scan_interval_seconds();
         let scan_interval = Arc::new(AtomicU64::new(scan_interval_secs));
-        let scheduler = scheduler::start_scheduler(collector.clone(), scan_interval.clone());
+        let (scheduler_wake, scheduler_wake_rx) = std::sync::mpsc::channel();
+        let scheduler =
+            scheduler::start_scheduler(collector.clone(), scan_interval.clone(), scheduler_wake_rx);
         let (view_tx, view_rx) = unbounded();
 
         let selection = collector.selection();
@@ -124,6 +129,7 @@ impl RTokenApp {
             skipped_update_version,
             scan_interval,
             scan_interval_select,
+            scheduler_wake,
         };
         app.state.provider_selection = selection;
         app.sync_chart_app_select(window, cx);
@@ -226,12 +232,19 @@ impl RTokenApp {
         cx.notify();
     }
 
-    /// Update the periodic rescan interval: persist it and signal the scheduler
-    /// thread so the new value takes effect on its next cycle.
+    /// Update the periodic rescan interval: persist it, wake the scheduler so
+    /// the new value takes effect immediately, and kick off a scan now so the
+    /// change shows without waiting for the next tick.
     pub fn select_scan_interval(&mut self, interval: ScanInterval, cx: &mut Context<Self>) {
-        self.scan_interval.store(interval.seconds(), Ordering::Relaxed);
-        if let Err(e) = self.collector.set_scan_interval_seconds(interval.seconds()) {
+        let secs = interval.seconds();
+        let changed = self.scan_interval.load(Ordering::Relaxed) != secs;
+        self.scan_interval.store(secs, Ordering::Relaxed);
+        if let Err(e) = self.collector.set_scan_interval_seconds(secs) {
             self.state.last_error = Some(format!("save scan interval: {e}"));
+        }
+        if changed {
+            let _ = self.scheduler_wake.send(());
+            self.trigger_scan(cx);
         }
         cx.notify();
     }
@@ -355,6 +368,15 @@ impl RTokenApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Only a newly *enabled* provider needs a fresh scan to collect data it
+        // hasn't been scanned for. Disabling just hides already-collected rows
+        // and reordering only changes display order, so both are fully handled
+        // by the view refresh below.
+        let newly_enabled = {
+            let old = self.state.provider_selection.enabled();
+            selection.enabled().iter().any(|p| !old.contains(p))
+        };
+
         self.state.provider_selection = selection.clone();
 
         // Drop UI state that points at a now-disabled provider.
@@ -374,7 +396,9 @@ impl RTokenApp {
             self.state.last_error = Some(format!("save app selection: {e}"));
         }
         self.sync_chart_app_select(window, cx);
-        self.trigger_scan(cx);
+        if newly_enabled {
+            self.trigger_scan(cx);
+        }
         self.refresh_view(cx);
         cx.notify();
     }
