@@ -23,27 +23,38 @@ pub(crate) fn discover_roots(suffix: &[&str]) -> Vec<ScanRoot> {
 }
 
 /// Append one root per (distro, user) whose `~/.claude`/`~/.codex` lives inside
-/// a WSL distribution. Best effort: any failure skips that distro and returns
-/// whatever else was found.
+/// a WSL distribution, plus the `root` user's home (`/root`), which is not a
+/// `/home` entry. Best effort: any failure skips that part and returns whatever
+/// else was found.
 #[cfg(windows)]
 fn discover_wsl_roots(suffix: &[&str]) -> Vec<ScanRoot> {
     let mut roots = Vec::new();
     for distro in wsl_distros() {
-        let home_root = PathBuf::from(format!(r"\\wsl.localhost\{distro}")).join("home");
+        let distro_root = PathBuf::from(format!(r"\\wsl.localhost\{distro}"));
         // Enumerating /home over the 9P UNC path may auto-start the distro
         // (slow on first access); this runs on the background scan thread, so
         // the UI is never blocked.
-        let Ok(entries) = std::fs::read_dir(&home_root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Some(user) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            let dir = suffix.iter().fold(entry.path(), |p, s| p.join(s));
+        let home_root = distro_root.join("home");
+        if let Ok(entries) = std::fs::read_dir(&home_root) {
+            for entry in entries.flatten() {
+                let Some(user) = entry.file_name().to_str().map(str::to_owned) else {
+                    continue;
+                };
+                let dir = suffix.iter().fold(entry.path(), |p, s| p.join(s));
+                roots.push(ScanRoot {
+                    dir,
+                    label: Some(format!("wsl/{distro}/{user}")),
+                });
+            }
+        }
+        // Root's home is /root rather than a /home entry, so include it
+        // explicitly — a session run as root would otherwise be invisible.
+        let root_home = distro_root.join("root");
+        if root_home.is_dir() {
+            let dir = suffix.iter().fold(root_home, |p, s| p.join(s));
             roots.push(ScanRoot {
                 dir,
-                label: Some(format!("wsl/{distro}/{user}")),
+                label: Some(format!("wsl/{distro}/root")),
             });
         }
     }

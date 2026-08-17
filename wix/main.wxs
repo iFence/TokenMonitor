@@ -69,7 +69,7 @@
 
         <Package Id='*'
             Keywords='Installer'
-            Description='Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, CodeBuddy, OpenCode, Qoder)'
+            Description='Token-usage tracking desktop app for AI coding tools (Claude Code, Codex, Gemini CLI, CodeBuddy, OpenCode, OpenClaw, Qoder, Pi)'
             Manufacturer='iFence'
             InstallerVersion='450'
             Languages='1033'

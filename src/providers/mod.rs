@@ -7,6 +7,7 @@ pub mod deepseek;
 pub mod gemini;
 pub mod openclaw;
 pub mod opencode;
+pub mod pi;
 pub mod qoder;
 mod roots;
 mod source;
@@ -16,7 +17,7 @@ pub use source::{FileStates, ProviderConfig, ProviderError, ProviderSource, Scan
 use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
-pub fn all_providers() -> [Provider; 8] {
+pub fn all_providers() -> [Provider; 9] {
     Provider::ALL
 }
 
@@ -72,6 +73,7 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             Provider::DeepSeek => {
                 Box::new(deepseek::DeepSeekSource::new(c.clone())) as Box<dyn ProviderSource>
             }
+            Provider::Pi => Box::new(pi::PiSource::new(c.clone())) as Box<dyn ProviderSource>,
         })
         .collect()
 }
