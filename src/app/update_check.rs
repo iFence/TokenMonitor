@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use gpui::Context;
-use http_client::{AsyncBody, HttpClient};
+use http_client::{AsyncBody, HttpClient, Method, Request, Response};
 use semver::Version;
 
 use super::app::RTokenApp;
@@ -18,6 +18,14 @@ const CHANGELOG_FILENAME: &str = "Changelog.md";
 
 fn changelog_url() -> String {
     format!("https://raw.githubusercontent.com/iFence/rToken/{DEFAULT_BRANCH}/{CHANGELOG_FILENAME}")
+}
+
+/// GitHub contents API for `Changelog.md`; with the raw media type it returns
+/// the file bytes directly (no base64). Unlike `raw.githubusercontent.com`,
+/// this hits `api.github.com` — the same host the update check itself already
+/// talks to, so it is a reachable fallback where the raw CDN is not.
+fn changelog_contents_url() -> String {
+    format!("https://api.github.com/repos/iFence/rToken/contents/{CHANGELOG_FILENAME}?ref={DEFAULT_BRANCH}")
 }
 
 #[derive(Debug, Clone)]
@@ -117,8 +125,8 @@ fn select_asset(assets: &[GithubAsset], portable: bool) -> Option<UpdateAsset> {
         })
 }
 
-async fn fetch_text(client: &Arc<dyn HttpClient>, url: &str) -> anyhow::Result<String> {
-    let response = client.get(url, AsyncBody::from(()), true).await?;
+/// Drain a response body into a string, erroring on non-2xx status.
+async fn response_text(response: Response<AsyncBody>) -> anyhow::Result<String> {
     if !response.status().is_success() {
         anyhow::bail!("http status {}", response.status());
     }
@@ -126,6 +134,31 @@ async fn fetch_text(client: &Arc<dyn HttpClient>, url: &str) -> anyhow::Result<S
     let mut bytes = Vec::new();
     futures::io::AsyncReadExt::read_to_end(&mut body, &mut bytes).await?;
     Ok(String::from_utf8(bytes)?)
+}
+
+async fn fetch_text(client: &Arc<dyn HttpClient>, url: &str) -> anyhow::Result<String> {
+    let response = client.get(url, AsyncBody::from(()), true).await?;
+    response_text(response).await
+}
+
+/// Fetch the current `Changelog.md`. `raw.githubusercontent.com` is the primary
+/// source (plain text, no rate limit); if it is unreachable or serves stale
+/// content, fall back to the GitHub contents API, which hits `api.github.com` —
+/// the same host the update check already uses for `releases/latest`.
+async fn fetch_changelog(client: &Arc<dyn HttpClient>) -> anyhow::Result<String> {
+    match fetch_text(client, &changelog_url()).await {
+        Ok(content) => Ok(content),
+        Err(_) => {
+            let request = Request::builder()
+                .uri(changelog_contents_url())
+                .method(Method::GET)
+                .header("Accept", "application/vnd.github.raw+json")
+                .body(AsyncBody::from(()))
+                .context("build GitHub contents API request")?;
+            let response = client.send(request).await?;
+            response_text(response).await
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +223,8 @@ fn parse_changelog(content: &str) -> Vec<ChangelogEntry> {
 
 /// Return release notes for versions `current < v <= latest`, sorted descending,
 /// joined with a `---` separator. Falls back to `fallback_body` (the GitHub
-/// release body) when no matching entries are found.
+/// release body, minus GitHub's auto-generated compare link) when no matching
+/// entries are found, and to a Releases-page pointer when that is empty too.
 fn aggregate_release_notes(
     entries: &[ChangelogEntry],
     current: &Version,
@@ -204,11 +238,7 @@ fn aggregate_release_notes(
     matched.sort_by(|a, b| b.version.cmp(&a.version));
 
     if matched.is_empty() {
-        return fallback_body
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_default()
-            .to_string();
+        return sanitize_release_body(fallback_body).unwrap_or_else(releases_fallback);
     }
 
     matched
@@ -216,6 +246,28 @@ fn aggregate_release_notes(
         .map(|entry| format!("## v{}\n\n{}", entry.version, entry.body.trim()))
         .collect::<Vec<_>>()
         .join("\n\n---\n\n")
+}
+
+/// Strip GitHub's auto-generated release boilerplate. Publishing a release
+/// without notes makes GitHub fill the body with a `**Full Changelog**:
+/// <compare-url>` line — never surface that bare compare link in the UI.
+/// Returns `None` when nothing real remains.
+fn sanitize_release_body(body: Option<&str>) -> Option<String> {
+    let cleaned = body?
+        .lines()
+        .filter(|line| !line.to_ascii_lowercase().contains("full changelog"))
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+/// Last-resort notes when neither the Changelog nor a usable release body is
+/// available: send the user to the Releases page.
+fn releases_fallback() -> String {
+    "更新说明请查看 [GitHub Releases](https://github.com/iFence/rToken/releases)。".to_string()
 }
 
 struct UpdateInfo {
@@ -249,14 +301,14 @@ async fn check_update(
         select_asset(&release.assets, portable).context("no matching update asset for platform")?;
     // Prefer the maintained Changelog (per-version release notes) over the
     // auto-generated GitHub release body, which is often just a compare link.
-    let notes = match fetch_text(client, &changelog_url()).await {
+    let notes = match fetch_changelog(client).await {
         Ok(content) => aggregate_release_notes(
             &parse_changelog(&content),
             current,
             &latest,
             release.body.as_deref(),
         ),
-        Err(_) => release.body.clone().unwrap_or_default(),
+        Err(_) => sanitize_release_body(release.body.as_deref()).unwrap_or_else(releases_fallback),
     };
     Ok(Some(UpdateInfo {
         latest_version: latest,
@@ -520,6 +572,41 @@ mod tests {
         // No matching entries → fall back to the release body.
         let notes = aggregate_release_notes(&entries, &v(0, 1, 4), &v(0, 1, 5), Some("fallback"));
         assert_eq!(notes, "fallback");
+    }
+
+    #[test]
+    fn sanitize_release_body_strips_auto_generated_compare_link() {
+        // GitHub's auto-generated body is just the compare link → nothing left.
+        let auto = Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2");
+        assert_eq!(sanitize_release_body(auto), None);
+
+        // Real notes with an auto-generated line appended keep the real notes.
+        let mixed = Some("## What's Changed\n- 新增功能\n\n**Full Changelog**: https://…");
+        let cleaned = sanitize_release_body(mixed).unwrap();
+        assert!(cleaned.contains("新增功能"));
+        assert!(!cleaned.to_ascii_lowercase().contains("full changelog"));
+    }
+
+    #[test]
+    fn aggregate_never_surfaces_auto_generated_compare_link() {
+        let entries = vec![ChangelogEntry {
+            version: v(0, 1, 2),
+            body: "current".into(),
+        }];
+        // No changelog entry between current and latest, and the release body
+        // is auto-generated → point at the Releases page, not the bare link.
+        let notes = aggregate_release_notes(
+            &entries,
+            &v(0, 1, 2),
+            &v(0, 1, 3),
+            Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2"),
+        );
+        assert!(notes.contains("GitHub Releases"));
+        assert!(!notes.to_ascii_lowercase().contains("full changelog"));
+
+        // A real release body is preserved as the fallback.
+        let notes = aggregate_release_notes(&entries, &v(0, 1, 2), &v(0, 1, 3), Some("修复了崩溃问题"));
+        assert_eq!(notes, "修复了崩溃问题");
     }
 
     #[test]
