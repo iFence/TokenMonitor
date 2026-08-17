@@ -1,5 +1,6 @@
 //! Provider data-source adapters: one per AI coding tool.
 
+pub mod antigravity;
 pub mod claude;
 pub mod codebuddy;
 pub mod codex;
@@ -17,7 +18,7 @@ pub use source::{FileStates, ProviderConfig, ProviderError, ProviderSource, Scan
 use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
-pub fn all_providers() -> [Provider; 9] {
+pub fn all_providers() -> [Provider; 10] {
     Provider::ALL
 }
 
@@ -57,6 +58,9 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             }
             Provider::Gemini => {
                 Box::new(gemini::GeminiSource::new(c.clone())) as Box<dyn ProviderSource>
+            }
+            Provider::Antigravity => {
+                Box::new(antigravity::AntigravitySource::new(c.clone())) as Box<dyn ProviderSource>
             }
             Provider::Codebuddy => {
                 Box::new(codebuddy::CodebuddySource::new(c.clone())) as Box<dyn ProviderSource>

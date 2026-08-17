@@ -12,6 +12,7 @@ pub enum Provider {
     Claude,
     Codex,
     Gemini,
+    Antigravity,
     Codebuddy,
     OpenCode,
     Qoder,
@@ -27,10 +28,11 @@ impl std::fmt::Display for Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 9] = [
+    pub const ALL: [Provider; 10] = [
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
+        Provider::Antigravity,
         Provider::Codebuddy,
         Provider::OpenCode,
         Provider::Qoder,
@@ -45,6 +47,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Gemini => "gemini",
+            Provider::Antigravity => "antigravity",
             Provider::Codebuddy => "codebuddy",
             Provider::OpenCode => "opencode",
             Provider::Qoder => "qoder",
@@ -59,6 +62,7 @@ impl Provider {
             Provider::Claude => "Claude Code",
             Provider::Codex => "Codex CLI",
             Provider::Gemini => "Gemini CLI",
+            Provider::Antigravity => "Antigravity",
             Provider::Codebuddy => "CodeBuddy",
             Provider::OpenCode => "OpenCode",
             Provider::Qoder => "Qoder",
