@@ -1,4 +1,4 @@
-//! rToken — token-usage tracking desktop app for AI coding tools.
+//! TokenMonitor — token-usage tracking desktop app for AI coding tools.
 //!
 //! Reads each AI coding tool's local usage data, persists it to SQLite,
 //! and presents aggregated token/cost statistics in a GPUI desktop UI.

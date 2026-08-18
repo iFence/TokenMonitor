@@ -320,7 +320,7 @@ fn about_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
                 .text_lg()
                 .font_bold()
                 .text_color(p.foreground)
-                .child("rToken"),
+                .child("TokenMonitor"),
         )
         .child(
             div()

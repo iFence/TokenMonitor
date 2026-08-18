@@ -44,7 +44,7 @@ pub fn render_topbar(
                     .text_lg()
                     .font_bold()
                     .text_color(p.foreground)
-                    .child("rToken"),
+                    .child("TokenMonitor"),
             ),
         )
         .child(

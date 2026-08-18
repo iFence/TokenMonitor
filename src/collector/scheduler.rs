@@ -44,7 +44,7 @@ pub fn start_scheduler(
                     }
                 }
                 Err(e) => {
-                    eprintln!("[rtoken] scheduled scan failed: {e}");
+                    eprintln!("[TokenMonitor] scheduled scan failed: {e}");
                 }
             }
         })

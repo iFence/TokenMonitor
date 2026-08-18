@@ -60,7 +60,7 @@
 
     <Product
         Id='*'
-        Name='rtoken'
+        Name='TokenMonitor'
         UpgradeCode='46EC524F-9836-42D6-8282-9D308DC6D944'
         Manufacturer='iFence'
         Language='1033'
@@ -84,11 +84,11 @@
 
         <Icon Id='rtokenICO' SourceFile='resources\rtoken.ico'/>
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
-        <Property Id='DiskPrompt' Value='rtoken Installation'/>
+        <Property Id='DiskPrompt' Value='TokenMonitor Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
-                <Directory Id='APPLICATIONFOLDER' Name='rtoken'>
+                <Directory Id='APPLICATIONFOLDER' Name='TokenMonitor'>
                     <!--
                       Disabling the license sidecar file in the installer is a two step process:
 
@@ -134,17 +134,17 @@
             </Directory>
 
             <Directory Id='ProgramMenuFolder'>
-                <Directory Id='ApplicationProgramsFolder' Name='rToken'>
+                <Directory Id='ApplicationProgramsFolder' Name='TokenMonitor'>
                     <Component Id='ApplicationShortcut' Guid='*'>
                         <Shortcut Id='ApplicationStartMenuShortcut'
-                            Name='rToken'
-                            Description='rToken - AI coding tool token usage tracker'
+                            Name='TokenMonitor'
+                            Description='TokenMonitor - AI coding tool token usage tracker'
                             Target='[#exe0]'
                             WorkingDirectory='APPLICATIONFOLDER'
                             Icon='rtokenICO'/>
                         <RemoveFolder Id='ApplicationProgramsFolder' On='uninstall'/>
                         <RegistryValue Root='HKCU'
-                            Key='Software\iFence\rToken'
+                            Key='Software\iFence\TokenMonitor'
                             Name='installed'
                             Type='integer'
                             Value='1'

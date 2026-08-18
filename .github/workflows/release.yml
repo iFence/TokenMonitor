@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
-          $root = "target/rtoken-portable-windows-x64"
+          $root = "target/TokenMonitor-portable-windows-x64"
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           Copy-Item "target/release/rtoken-app.exe" "$root/"
           Copy-Item "README.md" "$root/"
@@ -53,12 +53,12 @@ jobs:
           if (-not (Test-Path "$root/rtoken-app.exe")) {
             throw "rtoken-app.exe is missing from the portable bundle"
           }
-          Compress-Archive -Path "$root/*" -DestinationPath "target/rtoken-v$version-windows-x64.zip"
+          Compress-Archive -Path "$root/*" -DestinationPath "target/TokenMonitor-v$version-windows-x64.zip"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             target/wix/*.msi
-            target/rtoken-*-windows-x64.zip
+            target/TokenMonitor-*-windows-x64.zip
           fail_on_unmatched_files: true

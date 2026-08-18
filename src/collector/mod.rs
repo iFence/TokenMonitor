@@ -63,7 +63,7 @@ impl Collector {
                 let updated = UsageRepo::new(&conn).recompute_all_costs(Pricer::global())?;
                 settings.set(PRICING_VERSION_KEY, PRICING_VERSION)?;
                 eprintln!(
-                    "rToken: backfilled cost for {updated} usage rows (pricing v{PRICING_VERSION})"
+                    "TokenMonitor: backfilled cost for {updated} usage rows (pricing v{PRICING_VERSION})"
                 );
             }
         }
@@ -216,7 +216,7 @@ fn load_provider_selection(conn: &Connection) -> Result<ProviderSelection> {
         Some(json) => match serde_json::from_str::<ProviderSelection>(&json) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("rToken: ignoring corrupt provider selection ({e}); using defaults");
+                eprintln!("TokenMonitor: ignoring corrupt provider selection ({e}); using defaults");
                 ProviderSelection::default()
             }
         },

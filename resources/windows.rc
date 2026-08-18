@@ -1,4 +1,4 @@
-// rToken Windows resources.
+// TokenMonitor Windows resources.
 //
 // Resource ID 1 (RT_ICON) is the application icon. GPUI's Windows platform
 // loads exactly this ID via LoadImageW(hModule, MAKEINTRESOURCE(1),
@@ -15,10 +15,10 @@ BEGIN
   BEGIN
     BLOCK "040904b0"
     BEGIN
-      VALUE "CompanyName", "rToken"
-      VALUE "FileDescription", "rToken - AI coding tool token usage tracker"
+      VALUE "CompanyName", "TokenMonitor"
+      VALUE "FileDescription", "TokenMonitor - AI coding tool token usage tracker"
       VALUE "FileVersion", "0.2.0"
-      VALUE "ProductName", "rToken"
+      VALUE "ProductName", "TokenMonitor"
       VALUE "ProductVersion", "0.2.0"
     END
   END

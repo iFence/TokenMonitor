@@ -2,7 +2,7 @@
 
 ## 项目意图
 
-rToken 是一个轻量的 AI 编程工具 Token 用量追踪桌面应用。核心保持干净：`src/core` 是纯 Rust 领域层（无 GPUI 依赖、可单元测试），`src/ui` 只做展示，`src/providers` 负责把各工具非结构化的本地用量数据归一化为 `UsageRecord`。聚合逻辑（`src/core/aggregation`）与 tokei 一致：分类、排序、带合计。
+TokenMonitor 是一个轻量的 AI 编程工具 Token 用量追踪桌面应用。核心保持干净：`src/core` 是纯 Rust 领域层（无 GPUI 依赖、可单元测试），`src/ui` 只做展示，`src/providers` 负责把各工具非结构化的本地用量数据归一化为 `UsageRecord`。聚合逻辑（`src/core/aggregation`）与 tokei 一致：分类、排序、带合计。
 
 ## 架构规则
 

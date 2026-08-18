@@ -25,17 +25,17 @@ pub fn run() -> anyhow::Result<()> {
         cx.on_action(|_: &Quit, cx| cx.quit());
         // GitHub release check + installer download go through this client.
         let http_client = reqwest_client::ReqwestClient::user_agent(concat!(
-            "rToken/",
+            "TokenMonitor/",
             env!("CARGO_PKG_VERSION")
         ))
-        .expect("failed to initialize rToken HTTP client");
+        .expect("failed to initialize TokenMonitor HTTP client");
         cx.set_http_client(Arc::new(http_client));
         let bounds = Bounds::centered(None, size(px(1100.0), px(800.0)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("rToken".into()),
+                    title: Some("TokenMonitor".into()),
                     ..Default::default()
                 }),
                 window_min_size: Some(size(px(600.0), px(600.0))),
@@ -47,7 +47,7 @@ pub fn run() -> anyhow::Result<()> {
                 cx.new(|cx| Root::new(view, window, cx).bordered(false))
             },
         )
-        .expect("failed to open rToken window");
+        .expect("failed to open TokenMonitor window");
         // Keep the native titlebar dark to match the dark panels, independent
         // of the OS light/dark theme. No-op on non-Windows platforms.
         crate::platform::apply_dark_titlebar();

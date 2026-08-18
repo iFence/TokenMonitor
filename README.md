@@ -1,4 +1,4 @@
-# rToken
+# TokenMonitor
 
 ![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=flat-square)
 
@@ -54,7 +54,7 @@ rustup show                    # 应激活 1.95.0-x86_64-pc-windows-msvc
 cargo fmt --check
 cargo check                    # lib + bin
 cargo test                     # 核心单测 + SQLite schema 测试
-cargo run                      # 启动 rToken 窗口
+cargo run                      # 启动 TokenMonitor 窗口
 ```
 
 > 首次编译会拉取并编译完整的 GPUI 依赖树（git 依赖来自 zed-industries/zed 与 longbridge/gpui-component），可能需要数分钟到二十分钟。

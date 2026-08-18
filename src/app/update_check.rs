@@ -615,12 +615,12 @@ mod tests {
     fn select_asset_picks_zip_for_portable_and_msi_for_installed() {
         let assets = vec![
             GithubAsset {
-                name: "rtoken-v0.2.2-windows-x64.zip".into(),
+                name: "TokenMonitor-v0.2.2-windows-x64.zip".into(),
                 browser_download_url: "https://example.com/portable.zip".into(),
                 size: 100,
             },
             GithubAsset {
-                name: "rtoken_0.2.2_x64_en-US.msi".into(),
+                name: "TokenMonitor_0.2.2_x64_en-US.msi".into(),
                 browser_download_url: "https://example.com/installer.msi".into(),
                 size: 200,
             },
