@@ -7,6 +7,13 @@
 - 标题下方直接填写会展示在应用更新弹窗中的 Markdown 内容
 - 使用 `---` 或下一个版本标题结束当前版本说明
 
+## v0.2.4
+
+### ✨ 新增功能
+- **支持 Antigravity 用量统计**：读取 `~/.gemini/antigravity-cli/` 与 `~/.gemini/antigravity-ide/` 下各会话 SQLite 库中模型生成步骤的 Token 用量（含输入/输出/缓存读），同时覆盖 Antigravity CLI 与 IDE；Windows 下自动发现并纳入各 WSL 发行版中的会话，与本地数据去重隔离。
+
+---
+
 ## v0.2.3
 
 ### ✨ 新增功能
