@@ -2,8 +2,8 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, WeakEntity, Window,
+    div, px, AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::checkbox::Checkbox;
@@ -117,12 +117,7 @@ fn general_panel(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement
                 .child(
                     v_flex()
                         .gap_1()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(p.foreground)
-                                .child("扫描间隔"),
-                        )
+                        .child(div().text_sm().text_color(p.foreground).child("扫描间隔"))
                         .child(
                             div()
                                 .text_xs()
@@ -374,7 +369,11 @@ fn check_updates_button(weak: &WeakEntity<RTokenApp>, busy: bool) -> Button {
 fn download_install_button(weak: &WeakEntity<RTokenApp>, portable: bool) -> Button {
     let weak = weak.clone();
     Button::new("about-download-install")
-        .label(if portable { "下载更新" } else { "下载并安装" })
+        .label(if portable {
+            "下载更新"
+        } else {
+            "下载并安装"
+        })
         .primary()
         .on_click(move |_, _: &mut Window, cx: &mut App| {
             let _ = weak.update(cx, |this, cx| this.download_and_install(cx));

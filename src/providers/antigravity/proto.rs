@@ -164,7 +164,10 @@ mod tests {
         let mut outer = vec![0x0a, inner.len() as u8];
         outer.extend_from_slice(&inner);
         let fields = parse_fields(&outer).unwrap();
-        assert_eq!(first_file_uri(&fields), Some(b"file:///a/b/c/dir".as_slice()));
+        assert_eq!(
+            first_file_uri(&fields),
+            Some(b"file:///a/b/c/dir".as_slice())
+        );
     }
 
     #[test]

@@ -90,35 +90,38 @@ pub fn scan_one(conn: &Connection, source: &dyn ProviderSource) -> Result<ScanSu
     let mut records: u64 = 0;
     let mut flush_err: Option<anyhow::Error> = None;
 
-    let output = match source.scan_incremental(&mut |r| {
-        records += 1;
-        projects.insert(r.project.clone());
-        // Pricing is the "later pipeline stage" the adapters defer to: resolve
-        // the model against the embedded price table and stamp `cost_micros`
-        // before the row is dedup-inserted.
-        let mut r = r;
-        r.usage.cost_micros = Pricer::global().cost_micros(
-            r.provider,
-            &r.usage.model,
-            r.usage.input_tokens,
-            r.usage.output_tokens,
-            r.usage.cache_read_tokens,
-            r.usage.cache_write_tokens,
-        );
-        batch.push(r);
-        if batch.len() >= INSERT_BATCH {
-            if flush_err.is_none() {
-                match usage_repo.batch_insert_dedup(&batch) {
-                    Ok(s) => {
-                        insert_stats.inserted += s.inserted;
-                        insert_stats.skipped_duplicates += s.skipped_duplicates;
+    let output = match source.scan_incremental(
+        &mut |r| {
+            records += 1;
+            projects.insert(r.project.clone());
+            // Pricing is the "later pipeline stage" the adapters defer to: resolve
+            // the model against the embedded price table and stamp `cost_micros`
+            // before the row is dedup-inserted.
+            let mut r = r;
+            r.usage.cost_micros = Pricer::global().cost_micros(
+                r.provider,
+                &r.usage.model,
+                r.usage.input_tokens,
+                r.usage.output_tokens,
+                r.usage.cache_read_tokens,
+                r.usage.cache_write_tokens,
+            );
+            batch.push(r);
+            if batch.len() >= INSERT_BATCH {
+                if flush_err.is_none() {
+                    match usage_repo.batch_insert_dedup(&batch) {
+                        Ok(s) => {
+                            insert_stats.inserted += s.inserted;
+                            insert_stats.skipped_duplicates += s.skipped_duplicates;
+                        }
+                        Err(e) => flush_err = Some(e),
                     }
-                    Err(e) => flush_err = Some(e),
                 }
+                batch.clear();
             }
-            batch.clear();
-        }
-    }, &known) {
+        },
+        &known,
+    ) {
         Ok(o) => o,
         // Tool not installed on this machine — not an error.
         Err(ProviderError::DataDirNotFound(_)) => return Ok(summary),

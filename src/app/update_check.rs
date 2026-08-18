@@ -577,7 +577,8 @@ mod tests {
     #[test]
     fn sanitize_release_body_strips_auto_generated_compare_link() {
         // GitHub's auto-generated body is just the compare link → nothing left.
-        let auto = Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2");
+        let auto =
+            Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2");
         assert_eq!(sanitize_release_body(auto), None);
 
         // Real notes with an auto-generated line appended keep the real notes.
@@ -605,7 +606,8 @@ mod tests {
         assert!(!notes.to_ascii_lowercase().contains("full changelog"));
 
         // A real release body is preserved as the fallback.
-        let notes = aggregate_release_notes(&entries, &v(0, 1, 2), &v(0, 1, 3), Some("修复了崩溃问题"));
+        let notes =
+            aggregate_release_notes(&entries, &v(0, 1, 2), &v(0, 1, 3), Some("修复了崩溃问题"));
         assert_eq!(notes, "修复了崩溃问题");
     }
 

@@ -404,7 +404,6 @@ impl ProviderSource for AntigravitySource {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -556,7 +555,7 @@ mod tests {
         assert_eq!(first.project, "zhy-ui");
         assert_eq!(first.session_id, uuid);
         assert_eq!(first.usage.model, "gemini"); // no settings.json
-        // input_total 12984, cached 8245 -> cache_read 8245, input 4739.
+                                                 // input_total 12984, cached 8245 -> cache_read 8245, input 4739.
         assert_eq!(first.usage.input_tokens, 4739);
         assert_eq!(first.usage.output_tokens, 452);
         assert_eq!(first.usage.cache_read_tokens, 8245);

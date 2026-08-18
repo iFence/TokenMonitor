@@ -12,13 +12,14 @@ pub mod pi;
 pub mod qoder;
 mod roots;
 mod source;
+pub mod workbuddy;
 
 pub use source::{FileStates, ProviderConfig, ProviderError, ProviderSource, ScanOutput};
 
 use crate::core::model::{Provider, ProviderSelection};
 
 /// All providers rToken can track, in display order.
-pub fn all_providers() -> [Provider; 10] {
+pub fn all_providers() -> [Provider; 11] {
     Provider::ALL
 }
 
@@ -64,6 +65,9 @@ pub fn build_sources(configs: &[ProviderConfig]) -> Vec<Box<dyn ProviderSource>>
             }
             Provider::Codebuddy => {
                 Box::new(codebuddy::CodebuddySource::new(c.clone())) as Box<dyn ProviderSource>
+            }
+            Provider::Workbuddy => {
+                Box::new(workbuddy::WorkbuddySource::new(c.clone())) as Box<dyn ProviderSource>
             }
             Provider::OpenCode => {
                 Box::new(opencode::OpenCodeSource::new(c.clone())) as Box<dyn ProviderSource>

@@ -35,10 +35,10 @@ pub fn render_page(
                                 .w(px(120.0))
                                 .text_sm()
                                 .child(format!("{} records", s.records)),
-                            div()
-                                .w(px(140.0))
-                                .text_sm()
-                                .child(format!("{} tokens", format_tokens_compact(s.total_tokens()))),
+                            div().w(px(140.0)).text_sm().child(format!(
+                                "{} tokens",
+                                format_tokens_compact(s.total_tokens())
+                            )),
                         ])
                 }))
                 .when(rows.is_empty(), |this| {
