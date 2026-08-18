@@ -117,7 +117,7 @@ pub(crate) fn first_len<'a>(fields: &[Field<'a>], number: u32) -> Option<&'a [u8
 /// into nested messages. In `trajectory_metadata_blob.data` the workspace URI
 /// sits two levels down (field 1 wraps a sub-message whose field 1 is the
 /// URI); recursion makes the exact nesting irrelevant.
-pub(crate) fn first_file_uri(fields: &[Field<'_>]) -> Option<&[u8]> {
+pub(crate) fn first_file_uri<'a>(fields: &[Field<'a>]) -> Option<&'a [u8]> {
     first_file_uri_depth(fields, 0)
 }
 
@@ -148,7 +148,7 @@ mod tests {
     fn decodes_varint_len_and_nested() {
         let mut buf = vec![0x08, 0x96, 0x01]; // field 1, varint 150
         let uri = b"file:///C:/proj";
-        buf.extend_from_slice(&[0x12, 0x0e]); // field 2, len 14
+        buf.extend_from_slice(&[0x12, 0x0f]); // field 2, len 15
         buf.extend_from_slice(uri);
         let fields = parse_fields(&buf).unwrap();
         assert_eq!(first_varint(&fields, 1), Some(150));

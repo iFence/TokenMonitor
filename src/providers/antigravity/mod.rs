@@ -280,7 +280,7 @@ impl AntigravitySource {
             // from the CLI, the IDE and WSL distros never collide.
             let rel = match &root.label {
                 Some(label) => Path::new(label).join(format!("{session_id}.db")),
-                None => Path::new(format!("{session_id}.db")).to_path_buf(),
+                None => PathBuf::from(format!("{session_id}.db")),
             };
 
             emit(UsageRecord::new(
@@ -363,18 +363,19 @@ impl ProviderSource for AntigravitySource {
                 if !name.ends_with(".db") {
                     continue;
                 }
-                let Some(session_id) = entry.path().file_stem().and_then(|s| s.to_str()) else {
+                let Some(session_id) = path.file_stem().and_then(|s| s.to_str()) else {
                     continue;
                 };
                 let conn = match Self::open_db(&path) {
                     Ok(c) => c,
                     Err(e) => {
+                        errors.push(e);
+                        continue;
+                    }
+                };
+                if let Err(e) = Self::scan_conversation(&conn, root, session_id, emit) {
                     errors.push(e);
-                    continue;
                 }
-            };
-            if let Err(e) = Self::scan_conversation(&conn, root, session_id, emit) {
-                errors.push(e);
             }
         }
         Ok(ScanOutput {
@@ -531,10 +532,12 @@ mod tests {
     fn parses_generations_into_records() {
         let dir = tempdir().unwrap();
         let uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeffff0000";
-        let rows = vec![
+        let gen_a = gen_metadata(1_750_000_000, 12984, 452, 8245);
+        let gen_b = gen_metadata(1_750_000_100, 5689, 115, 16478);
+        let rows: Vec<(i64, i64, Option<&[u8]>)> = vec![
             (0, 14, None), // user input - skipped
-            (1, 15, Some(&gen_metadata(1_750_000_000, 12984, 452, 8245))),
-            (2, 15, Some(&gen_metadata(1_750_000_100, 5689, 115, 16478))),
+            (1, 15, Some(&gen_a)),
+            (2, 15, Some(&gen_b)),
             (3, 8, None), // tool result - skipped
         ];
         write_conversation_store(
@@ -574,10 +577,13 @@ mod tests {
     #[test]
     fn skips_non_generation_and_malformed_steps() {
         let dir = tempdir().unwrap();
-        let rows = vec![
-            (0, 15, Some(&gen_metadata(1_750_000_000, 0, 0, 0))), // zero tokens
-            (1, 15, Some(&[0x00, 0xff, 0x12, 0x08])),             // malformed
-            (2, 15, Some(&gen_metadata(1_750_000_100, 10, 5, 0))),
+        let gen_a = gen_metadata(1_750_000_000, 0, 0, 0);
+        let malformed = [0x00, 0xff, 0x12, 0x08];
+        let gen_b = gen_metadata(1_750_000_100, 10, 5, 0);
+        let rows: Vec<(i64, i64, Option<&[u8]>)> = vec![
+            (0, 15, Some(&gen_a)),     // zero tokens
+            (1, 15, Some(&malformed)), // malformed
+            (2, 15, Some(&gen_b)),
             (3, 15, None), // no metadata
         ];
         write_conversation_store(dir.path(), "aaaa-0000", "file:///p", &rows);
@@ -596,7 +602,8 @@ mod tests {
             r#"{"model": "Gemini 3.7 Flash (Medium)", "colorScheme": "dark"}"#,
         )
         .unwrap();
-        let rows = vec![(0, 15, Some(&gen_metadata(1_750_000_000, 10, 5, 0)))];
+        let gen = gen_metadata(1_750_000_000, 10, 5, 0);
+        let rows: Vec<(i64, i64, Option<&[u8]>)> = vec![(0, 15, Some(&gen))];
         write_conversation_store(dir.path(), uuid, "file:///p", &rows);
         let (_, records) = scan_collect(&source_for(dir.path()));
         assert_eq!(records[0].usage.model, "Gemini 3.7 Flash (Medium)");

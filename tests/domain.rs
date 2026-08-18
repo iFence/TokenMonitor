@@ -123,7 +123,7 @@ fn time_window_bounds() {
     let trailing = TimeWindow::last_n_days(7, now);
     assert_eq!(
         trailing.start,
-        Utc.with_ymd_and_hms(2026, 8, 6, 16, 0, 0).unwrap()
+        Utc.with_ymd_and_hms(2026, 8, 7, 16, 0, 0).unwrap()
     );
     // Half-open window [start, now): a point strictly inside is contained.
     assert!(trailing.contains(now - Duration::minutes(5)));
