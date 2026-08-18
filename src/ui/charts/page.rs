@@ -67,7 +67,7 @@ pub fn render_page(
                 })
                 .child(seg_label(p.muted_foreground, "指标"))
                 .child(div().w(px(140.0)).child(Select::new(&metric_select)))
-                .child(seg_label(p.muted_foreground, "应用"))
+                .child(seg_label(p.muted_foreground, "Agent"))
                 .child(div().w(px(160.0)).child(Select::new(&app_select))),
         )
         .child(main_section(&data, metric, bucket, cx))

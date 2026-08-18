@@ -15,7 +15,7 @@ pub fn render_page(
     let p = crate::ui::palette(cx);
     let rows = &app.state.by_project;
 
-    page_shell(cx, "项目", "按代码项目分组的 Token 用量")
+    page_shell(cx, "项目", Some("按代码项目分组的 Token 用量"))
         .child(
             v_flex()
                 .rounded(p.radius)

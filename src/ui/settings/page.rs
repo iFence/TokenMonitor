@@ -27,7 +27,7 @@ pub fn render_page(
     let weak = app.weak_self.clone();
     let group = app.state.settings_group;
 
-    page_shell(cx, "设置", "应用配置与关于")
+    page_shell(cx, "设置", None)
         .child(
             h_flex()
                 .gap_4()

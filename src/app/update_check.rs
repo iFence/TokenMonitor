@@ -12,12 +12,12 @@ use semver::Version;
 
 use super::app::RTokenApp;
 
-const RELEASES_LATEST_URL: &str = "https://api.github.com/repos/iFence/rToken/releases/latest";
+const RELEASES_LATEST_URL: &str = "https://api.github.com/repos/iFence/TokenMonitor/releases/latest";
 const DEFAULT_BRANCH: &str = "main";
 const CHANGELOG_FILENAME: &str = "Changelog.md";
 
 fn changelog_url() -> String {
-    format!("https://raw.githubusercontent.com/iFence/rToken/{DEFAULT_BRANCH}/{CHANGELOG_FILENAME}")
+    format!("https://raw.githubusercontent.com/iFence/TokenMonitor/{DEFAULT_BRANCH}/{CHANGELOG_FILENAME}")
 }
 
 /// GitHub contents API for `Changelog.md`; with the raw media type it returns
@@ -25,7 +25,7 @@ fn changelog_url() -> String {
 /// this hits `api.github.com` — the same host the update check itself already
 /// talks to, so it is a reachable fallback where the raw CDN is not.
 fn changelog_contents_url() -> String {
-    format!("https://api.github.com/repos/iFence/rToken/contents/{CHANGELOG_FILENAME}?ref={DEFAULT_BRANCH}")
+    format!("https://api.github.com/repos/iFence/TokenMonitor/contents/{CHANGELOG_FILENAME}?ref={DEFAULT_BRANCH}")
 }
 
 #[derive(Debug, Clone)]
@@ -267,7 +267,7 @@ fn sanitize_release_body(body: Option<&str>) -> Option<String> {
 /// Last-resort notes when neither the Changelog nor a usable release body is
 /// available: send the user to the Releases page.
 fn releases_fallback() -> String {
-    "更新说明请查看 [GitHub Releases](https://github.com/iFence/rToken/releases)。".to_string()
+    "更新说明请查看 [GitHub Releases](https://github.com/iFence/TokenMonitor/releases)。".to_string()
 }
 
 struct UpdateInfo {
@@ -578,7 +578,7 @@ mod tests {
     fn sanitize_release_body_strips_auto_generated_compare_link() {
         // GitHub's auto-generated body is just the compare link → nothing left.
         let auto =
-            Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2");
+            Some("**Full Changelog**: https://github.com/iFence/TokenMonitor/compare/v0.2.1...v0.2.2");
         assert_eq!(sanitize_release_body(auto), None);
 
         // Real notes with an auto-generated line appended keep the real notes.
@@ -600,7 +600,7 @@ mod tests {
             &entries,
             &v(0, 1, 2),
             &v(0, 1, 3),
-            Some("**Full Changelog**: https://github.com/iFence/rToken/compare/v0.2.1...v0.2.2"),
+            Some("**Full Changelog**: https://github.com/iFence/TokenMonitor/compare/v0.2.1...v0.2.2"),
         );
         assert!(notes.contains("GitHub Releases"));
         assert!(!notes.to_ascii_lowercase().contains("full changelog"));

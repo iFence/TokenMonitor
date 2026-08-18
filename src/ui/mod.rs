@@ -11,6 +11,7 @@ use gpui::{
     div, AnyElement, Context, Div, InteractiveElement, ParentElement, Stateful,
     StatefulInteractiveElement, Styled, Window,
 };
+use gpui::prelude::FluentBuilder as _;
 use gpui::{Hsla, Pixels};
 use gpui_component::{v_flex, ActiveTheme, StyledExt};
 
@@ -55,7 +56,11 @@ pub fn router(app: &mut RTokenApp, window: &mut Window, cx: &mut Context<RTokenA
 }
 
 /// Standard page container: a scrollable column with a title header.
-pub(crate) fn page_shell(cx: &Context<RTokenApp>, title: &str, subtitle: &str) -> Stateful<Div> {
+pub(crate) fn page_shell(
+    cx: &Context<RTokenApp>,
+    title: &str,
+    subtitle: Option<&str>,
+) -> Stateful<Div> {
     let p = palette(cx);
     v_flex()
         .id("rtoken-page")
@@ -75,11 +80,13 @@ pub(crate) fn page_shell(cx: &Context<RTokenApp>, title: &str, subtitle: &str) -
                         .text_color(p.foreground)
                         .child(title.to_string()),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(p.muted_foreground)
-                        .child(subtitle.to_string()),
-                ),
+                .when_some(subtitle, |this, subtitle| {
+                    this.child(
+                        div()
+                            .text_sm()
+                            .text_color(p.muted_foreground)
+                            .child(subtitle.to_string()),
+                    )
+                }),
         )
 }
