@@ -11,6 +11,7 @@
 
 ### ✨ 新增功能
 - **支持 Antigravity 用量统计**：读取 `~/.gemini/antigravity-cli/` 与 `~/.gemini/antigravity-ide/` 下各会话 SQLite 库中模型生成步骤的 Token 用量（含输入/输出/缓存读），同时覆盖 Antigravity CLI 与 IDE；Windows 下自动发现并纳入各 WSL 发行版中的会话，与本地数据去重隔离。
+- **支持 WorkBuddy 用量统计**：读取 `~/.workbuddy/projects/**/*.jsonl` 会话记录中的 `message.usage` / `providerData.usage`，兼容新旧字段命名，纳入 Token 用量与成本统计。
 
 ---
 
