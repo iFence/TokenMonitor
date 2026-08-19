@@ -12,7 +12,8 @@ use semver::Version;
 
 use super::app::RTokenApp;
 
-const RELEASES_LATEST_URL: &str = "https://api.github.com/repos/iFence/TokenMonitor/releases/latest";
+const RELEASES_LATEST_URL: &str =
+    "https://api.github.com/repos/iFence/TokenMonitor/releases/latest";
 const DEFAULT_BRANCH: &str = "main";
 const CHANGELOG_FILENAME: &str = "Changelog.md";
 
@@ -267,7 +268,8 @@ fn sanitize_release_body(body: Option<&str>) -> Option<String> {
 /// Last-resort notes when neither the Changelog nor a usable release body is
 /// available: send the user to the Releases page.
 fn releases_fallback() -> String {
-    "更新说明请查看 [GitHub Releases](https://github.com/iFence/TokenMonitor/releases)。".to_string()
+    "更新说明请查看 [GitHub Releases](https://github.com/iFence/TokenMonitor/releases)。"
+        .to_string()
 }
 
 struct UpdateInfo {
@@ -577,8 +579,9 @@ mod tests {
     #[test]
     fn sanitize_release_body_strips_auto_generated_compare_link() {
         // GitHub's auto-generated body is just the compare link → nothing left.
-        let auto =
-            Some("**Full Changelog**: https://github.com/iFence/TokenMonitor/compare/v0.2.1...v0.2.2");
+        let auto = Some(
+            "**Full Changelog**: https://github.com/iFence/TokenMonitor/compare/v0.2.1...v0.2.2",
+        );
         assert_eq!(sanitize_release_body(auto), None);
 
         // Real notes with an auto-generated line appended keep the real notes.

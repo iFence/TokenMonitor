@@ -23,7 +23,7 @@ use crate::ui;
 
 use super::state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartRangeItem, ChartsSnapshot,
-    ScanInterval, ScanStatus, SettingsGroup, TimeTab, ViewSnapshot,
+    ReportSnapshot, ScanInterval, ScanStatus, TimeTab, ViewSnapshot,
 };
 use super::update_check::UpdateCheckUiState;
 
@@ -54,8 +54,6 @@ pub struct RTokenApp {
     /// Wakes the scheduler thread when the interval changes so the new value
     /// takes effect immediately instead of after the old cycle elapses.
     scheduler_wake: std::sync::mpsc::Sender<()>,
-    /// Settings "General" dropdown for the rescan interval.
-    pub scan_interval_select: Entity<SelectState<Vec<ScanInterval>>>,
 }
 
 impl RTokenApp {
@@ -98,17 +96,6 @@ impl RTokenApp {
             )
         });
         let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
-        let scan_interval_select = cx.new(|cx| {
-            SelectState::new(
-                ScanInterval::ALL.to_vec(),
-                Some(IndexPath::default()),
-                window,
-                cx,
-            )
-        });
-        scan_interval_select.update(cx, |select, cx| {
-            select.set_selected_value(&ScanInterval::from_seconds(scan_interval_secs), window, cx);
-        });
 
         let mut app = RTokenApp {
             state: AppState::default(),
@@ -128,7 +115,6 @@ impl RTokenApp {
             check_updates_on_startup,
             skipped_update_version,
             scan_interval,
-            scan_interval_select,
             scheduler_wake,
         };
         app.state.provider_selection = selection;
@@ -197,20 +183,6 @@ impl RTokenApp {
             .detach();
         }
 
-        {
-            let interval_select = app.scan_interval_select.clone();
-            cx.subscribe_in(
-                &interval_select,
-                window,
-                |this, _, ev: &SelectEvent<Vec<ScanInterval>>, _, cx| {
-                    if let SelectEvent::Confirm(Some(interval)) = ev {
-                        this.select_scan_interval(*interval, cx);
-                    }
-                },
-            )
-            .detach();
-        }
-
         app.spawn_event_loop(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
         app.refresh_view(cx); // async: returns immediately, fills state in background
@@ -260,15 +232,10 @@ impl RTokenApp {
     /// Switch the active page; entering the charts page triggers a load.
     pub fn select_page(&mut self, page: ActivePage, cx: &mut Context<Self>) {
         self.state.active_page = page;
-        if page == ActivePage::Charts {
+        self.state.report_hover = None;
+        if page == ActivePage::Charts || page == ActivePage::Report {
             self.refresh_view(cx);
         }
-        cx.notify();
-    }
-
-    /// Switch the settings page group (left-hand navigation).
-    pub fn select_settings_group(&mut self, group: SettingsGroup, cx: &mut Context<Self>) {
-        self.state.settings_group = group;
         cx.notify();
     }
 
@@ -510,14 +477,20 @@ impl RTokenApp {
         } else {
             None
         };
+        let report = if self.state.active_page == ActivePage::Report {
+            Some(TimeWindow::last_n_days(365, now))
+        } else {
+            None
+        };
         let enabled = self.state.provider_selection.enabled();
         let tx = self.view_tx.clone();
 
         std::thread::Builder::new()
             .name("rtoken-aggregate".into())
             .spawn(move || {
-                let snapshot =
-                    compute_view_snapshot(seq, time_tab, &db_path, window, charts, &enabled);
+                let snapshot = compute_view_snapshot(
+                    seq, time_tab, &db_path, window, charts, report, &enabled,
+                );
                 let _ = tx.send_blocking(snapshot);
             })
             .expect("spawn aggregate thread");
@@ -540,6 +513,9 @@ impl RTokenApp {
         if let Some(charts) = snap.charts {
             self.state.charts.data = Some(charts);
         }
+        if let Some(report) = snap.report {
+            self.state.report.data = Some(report);
+        }
         if let Some(error) = snap.error {
             self.state.last_error = Some(error);
         }
@@ -554,6 +530,7 @@ fn compute_view_snapshot(
     db_path: &std::path::Path,
     window: TimeWindow,
     charts: Option<(TimeWindow, ChartApp)>,
+    report: Option<TimeWindow>,
     enabled: &[Provider],
 ) -> ViewSnapshot {
     let mut snap = ViewSnapshot {
@@ -594,6 +571,25 @@ fn compute_view_snapshot(
     }
     if let Some((chart_window, app)) = charts {
         snap.charts = Some(compute_chart_snapshot(&repo, chart_window, app, enabled));
+    }
+    if let Some(report_window) = report {
+        snap.report = Some(compute_report_snapshot(&repo, report_window));
+    }
+    snap
+}
+
+/// Compute the report page's raw daily series (last 365 East-8 calendar days).
+fn compute_report_snapshot(repo: &UsageRepo<'_>, window: TimeWindow) -> ReportSnapshot {
+    let mut snap = ReportSnapshot::default();
+    if let Ok(series) = repo.daily_series(&window) {
+        snap.days = series
+            .into_iter()
+            .filter_map(|(key, stats)| {
+                NaiveDate::parse_from_str(&key, "%Y-%m-%d")
+                    .ok()
+                    .map(|date| (date, stats))
+            })
+            .collect();
     }
     snap
 }
@@ -656,6 +652,20 @@ impl Render for RTokenApp {
         use gpui_component::{Theme, ThemeMode};
         if Theme::global(cx).mode != ThemeMode::Dark {
             Theme::change(ThemeMode::Dark, None, cx);
+        }
+        // The default dark theme's surfaces are near-black (#0a0a0a). Lift the
+        // main panels to a lighter slate so the app reads as dark-gray rather
+        // than pure black.
+        {
+            let theme = Theme::global_mut(cx);
+            theme.background = ui::hsla_from_hex(0x1b1e24);
+            theme.secondary = ui::hsla_from_hex(0x262b33);
+            theme.muted = ui::hsla_from_hex(0x2a2f38);
+            theme.border = ui::hsla_from_hex(0x343a44);
+            // Floating popovers (Select dropdown, DatePicker) default to
+            // near-black too; lift them to the card surface so they sit above
+            // the panel without reading as a black void.
+            theme.tokens.popover = ui::hsla_from_hex(0x262b33).into();
         }
 
         let p = crate::ui::palette(cx);

@@ -9,7 +9,7 @@ pub use actions::Quit;
 pub use app::RTokenApp;
 pub use state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
-    ScanStatus, TimeTab, ViewSnapshot,
+    ReportSnapshot, ReportState, ScanStatus, TimeTab, ViewSnapshot,
 };
 
 use std::sync::Arc;
@@ -38,7 +38,10 @@ pub fn run() -> anyhow::Result<()> {
                     title: Some("TokenMonitor".into()),
                     ..Default::default()
                 }),
-                window_min_size: Some(size(px(600.0), px(600.0))),
+                // Measured from the running window (836x671 at scale factor
+                // 1.0); the report heatmap needs ~827px of width, so this is
+                // also the narrowest width at which it fits without clipping.
+                window_min_size: Some(size(px(836.0), px(671.0))),
                 ..Default::default()
             },
             move |window, cx| {

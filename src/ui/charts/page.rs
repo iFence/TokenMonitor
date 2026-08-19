@@ -216,7 +216,8 @@ fn series_colors(cx: &Context<RTokenApp>) -> Vec<Hsla> {
         t.chart_4,
         t.chart_5,
         Hsla {
-            h: 200.0,
+            // GPUI stores hue normalized to 0..=1 (not degrees).
+            h: 200.0 / 360.0,
             s: 0.6,
             l: 0.55,
             a: 1.0,

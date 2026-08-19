@@ -216,7 +216,9 @@ fn load_provider_selection(conn: &Connection) -> Result<ProviderSelection> {
         Some(json) => match serde_json::from_str::<ProviderSelection>(&json) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("TokenMonitor: ignoring corrupt provider selection ({e}); using defaults");
+                eprintln!(
+                    "TokenMonitor: ignoring corrupt provider selection ({e}); using defaults"
+                );
                 ProviderSelection::default()
             }
         },

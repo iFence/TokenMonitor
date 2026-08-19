@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
+use gpui::{Bounds, Pixels};
 
 use crate::core::aggregation::SumStats;
 use crate::core::model::{Period, Provider, ProviderSelection, TimeWindow};
@@ -13,6 +14,7 @@ pub enum ActivePage {
     Project,
     Settings,
     Charts,
+    Report,
 }
 
 /// Dashboard time-range tab (a UI concept; not persisted, decoupled from the
@@ -57,27 +59,6 @@ impl TimeTab {
             Self::LastWeek => TimeWindow::previous(Period::Week, now),
             Self::ThisMonth => TimeWindow::current(Period::Month, now),
             Self::ThisYear => TimeWindow::current_year(now),
-        }
-    }
-}
-
-/// Settings page group (left-hand navigation).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SettingsGroup {
-    #[default]
-    General,
-    Applications,
-    About,
-}
-
-impl SettingsGroup {
-    pub const ALL: [SettingsGroup; 3] = [Self::General, Self::Applications, Self::About];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::General => "通用",
-            Self::Applications => "应用",
-            Self::About => "关于",
         }
     }
 }
@@ -159,7 +140,6 @@ pub enum ScanStatus {
 #[derive(Debug, Clone, Default)]
 pub struct AppState {
     pub active_page: ActivePage,
-    pub settings_group: SettingsGroup,
     pub time_tab: TimeTab,
     pub expanded_provider: Option<Provider>,
     pub selected_project: Option<String>,
@@ -172,6 +152,9 @@ pub struct AppState {
     pub by_project: Vec<(String, SumStats)>,
     pub by_day: Vec<(String, SumStats)>,
     pub charts: ChartsState,
+    pub report: ReportState,
+    /// Hovered heatmap cell, used to render the report page's per-day tooltip.
+    pub report_hover: Option<ReportHover>,
 }
 
 /// Charts page time range (a UI concept, not persisted). `Custom` is the
@@ -336,6 +319,29 @@ impl ChartsState {
     }
 }
 
+/// Raw per-day series for the report page. Days are East-8 calendar dates in
+/// chronological ascending order; only days with recorded usage are present.
+#[derive(Debug, Clone, Default)]
+pub struct ReportSnapshot {
+    pub days: Vec<(NaiveDate, SumStats)>,
+}
+
+/// Report page loaded-data state.
+#[derive(Debug, Clone, Default)]
+pub struct ReportState {
+    pub data: Option<ReportSnapshot>,
+}
+
+/// The heatmap cell currently under the mouse: its date, stats, and window
+/// bounds (recorded each prepaint while hovered, so the tooltip tracks the
+/// cell during scroll/resize).
+#[derive(Debug, Clone, Copy)]
+pub struct ReportHover {
+    pub date: NaiveDate,
+    pub stats: SumStats,
+    pub bounds: Bounds<Pixels>,
+}
+
 /// A complete set of aggregate view data, computed on a background thread and
 /// applied to app state on the main thread. All fields are owned and `Send`.
 #[derive(Debug, Default)]
@@ -349,5 +355,6 @@ pub struct ViewSnapshot {
     pub by_project: Vec<(String, SumStats)>,
     pub by_day: Vec<(String, SumStats)>,
     pub charts: Option<ChartsSnapshot>,
+    pub report: Option<ReportSnapshot>,
     pub error: Option<String>,
 }
