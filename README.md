@@ -1,4 +1,9 @@
+
+
 # TokenMonitor
+<p align="center">
+  <img src="resources/tokenmonitor.png" alt="TokenMonitor" width="96" height="96">
+</p>
 
 ![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=flat-square)
 

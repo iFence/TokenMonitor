@@ -38,6 +38,21 @@ jobs:
       - name: Build MSI installer
         run: cargo wix
 
+      # cargo-wix names the MSI from the Cargo package name ("rtoken-*.msi");
+      # rename it to match the portable zip's TokenMonitor branding. The MSI's
+      # installed display name (Product Name / folder / start menu) already
+      # comes from wix/main.wxs, which says TokenMonitor.
+      - name: Rename MSI to TokenMonitor
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $msi = Get-ChildItem "target/wix/*.msi" | Select-Object -First 1
+          if (-not $msi) {
+            throw "no MSI found under target/wix"
+          }
+          Move-Item -LiteralPath $msi.FullName `
+            -Destination "target/wix/TokenMonitor-v$version-windows-x64.msi" -Force
+
       - name: Build portable zip
         shell: pwsh
         run: |
