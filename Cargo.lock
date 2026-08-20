@@ -5527,7 +5527,7 @@ dependencies = [
 
 [[package]]
 name = "rtoken"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "async-channel",
