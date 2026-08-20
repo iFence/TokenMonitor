@@ -28,9 +28,10 @@ use crate::ui::{hsla_from_hex, palette};
 /// coordinates (recorded at prepaint), so the caller can pin a tooltip to it.
 pub type HoverCallback = dyn Fn(bool, Bounds<Pixels>, NaiveDate, SumStats, &mut Window, &mut App);
 
-/// Called when the heatmap's measured width changes (window resize / card
-/// reflow), so the page can request a re-render with the new cell size.
-pub type ResizeCallback = dyn Fn(&mut Window, &mut App);
+/// Called with the heatmap's measured bounds on every prepaint, so the page
+/// can re-render with the new cell size / tooltip anchor when the card
+/// resizes or reflows. The callback is responsible for change detection.
+pub type ResizeCallback = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
 
 /// Minimum/maximum cell size (px) the grid scales between.
 const CELL_MIN: f32 = 4.0;
@@ -59,6 +60,7 @@ impl ContributionHeatmap {
 
     pub fn render(
         &self,
+        measured: Bounds<Pixels>,
         hover: Option<ReportHover>,
         on_hover: &Rc<HoverCallback>,
         on_resize: &Rc<ResizeCallback>,
@@ -75,11 +77,10 @@ impl ContributionHeatmap {
             .max()
             .unwrap_or(0);
         let colors = level_colors();
-        let container_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
-        // Cell size for the width measured on the previous frame; the prepaint
-        // callback below re-renders us when the width changes, so the grid
-        // follows window resizes within a frame.
-        let cell = cell_size(container_bounds.get().size.width.as_f32(), weeks);
+        // Cell size from the card bounds measured on the previous frame; the
+        // prepaint callback below re-renders us when the bounds change, so the
+        // grid follows window resizes within a frame.
+        let cell = cell_size(measured.size.width.as_f32(), weeks);
 
         // Fixed-pixel square cells sized from the measured card width, so the
         // grid shrinks/grows with the window instead of overflowing.
@@ -114,25 +115,16 @@ impl ContributionHeatmap {
             }))
         }));
 
-        let container_bounds_prepaint = container_bounds.clone();
-        let last_width = Rc::new(Cell::new(0.0_f32));
         let on_resize = on_resize.clone();
         v_flex()
             .relative()
             .gap_1()
-            .on_prepaint(move |bounds, window, cx| {
-                container_bounds_prepaint.set(bounds);
-                let width = bounds.size.width.as_f32();
-                if (width - last_width.get()).abs() > 0.5 {
-                    last_width.set(width);
-                    on_resize(window, cx);
-                }
-            })
+            .on_prepaint(move |bounds, window, cx| on_resize(bounds, window, cx))
             .child(month_row(start, today, cell, &p))
             .child(h_flex().child(weekday_labels(cell, &p)).child(grid))
             .when_some(hover, |this, hover| {
-                let origin = container_bounds.get().origin;
-                let width = container_bounds.get().size.width.as_f32();
+                let origin = measured.origin;
+                let width = measured.size.width.as_f32();
                 let ox = (hover.bounds.origin.x - origin.x).as_f32();
                 let oy = (hover.bounds.origin.y - origin.y).as_f32();
                 // Flip to the left of the cell when the tooltip would cross
@@ -204,7 +196,7 @@ fn month_labels(start: NaiveDate, today: NaiveDate) -> Vec<(usize, String)> {
             break;
         }
         if first >= start {
-            labels.push((week_index(first, start), format!("{month}月")));
+            labels.push((week_index(first, start), format!("{month}")));
         }
         if month == 12 {
             year += 1;
@@ -368,6 +360,7 @@ fn month_row(
                             .left_0()
                             .top_0()
                             .text_xs()
+                            .whitespace_nowrap()
                             .text_color(p.muted_foreground)
                             .child(label.clone()),
                     )
@@ -387,12 +380,18 @@ mod tests {
     /// events back into its own state, mirroring `page.rs::hover_callback`.
     struct HeatmapHarness {
         heatmap: ContributionHeatmap,
+        /// Last measured card bounds, fed back into the heatmap on the next
+        /// render - mirrors `ReportState::heatmap_bounds` in `page.rs`.
+        bounds: Bounds<Pixels>,
         hover: Option<ReportHover>,
         /// `(hovered, date, total_tokens)` transitions observed so far.
         events: Rc<RefCell<Vec<(bool, NaiveDate, u64)>>>,
         /// The cell bounds recorded when the hover callback fired; must be
         /// non-zero so the tooltip can be pinned to the right spot.
         hover_bounds: Rc<RefCell<Bounds<Pixels>>>,
+        /// The card bounds observed by the resize callback, to assert that
+        /// the measurement loop converges on the real card width.
+        measured: Rc<Cell<Bounds<Pixels>>>,
         /// True once a render included the tooltip (i.e. `hover` was set).
         tooltip_seen: Rc<Cell<bool>>,
         render_count: Rc<Cell<usize>>,
@@ -405,9 +404,10 @@ mod tests {
                 self.tooltip_seen.set(true);
             }
             let weak = cx.weak_entity();
+            let hover_weak = weak.clone();
             let on_hover: Rc<HoverCallback> =
                 Rc::new(move |is_hovered, bounds, date, stats, _window, cx| {
-                    let _ = weak.update(cx, |view, cx| {
+                    let _ = hover_weak.update(cx, |view, cx| {
                         view.events
                             .borrow_mut()
                             .push((is_hovered, date, stats.total_tokens()));
@@ -426,13 +426,29 @@ mod tests {
                         cx.notify();
                     });
                 });
-            let on_resize: Rc<ResizeCallback> = Rc::new(|_window, _cx| {});
+            let on_resize: Rc<ResizeCallback> = Rc::new(move |bounds, _window, cx| {
+                let _ = weak.update(cx, |view, cx| {
+                    view.measured.set(bounds);
+                    let prev = view.bounds;
+                    if (prev.size.width.as_f32() - bounds.size.width.as_f32()).abs() > 0.5
+                        || (prev.origin.x.as_f32() - bounds.origin.x.as_f32()).abs() > 0.5
+                        || (prev.origin.y.as_f32() - bounds.origin.y.as_f32()).abs() > 0.5
+                    {
+                        view.bounds = bounds;
+                        cx.notify();
+                    }
+                });
+            });
             // Nest the heatmap under an offset parent, mirroring the report
             // page's card/shell hierarchy, so coordinate-space bugs in tooltip
             // pinning show up as wrong positions here too.
-            v_flex()
-                .pt(px(200.0))
-                .child(self.heatmap.render(self.hover, &on_hover, &on_resize, cx))
+            v_flex().pt(px(200.0)).child(self.heatmap.render(
+                self.bounds,
+                self.hover,
+                &on_hover,
+                &on_resize,
+                cx,
+            ))
         }
     }
 
@@ -470,11 +486,20 @@ mod tests {
     }
 
     #[test]
+    fn cell_size_fills_available_width_and_clamps() {
+        // A 772px card leaves exactly 11px cells for a 53-week grid:
+        // 772 = GUTTER + 53 * (11 + GAP).
+        assert_eq!(cell_size(772.0, 53), 11.0);
+        assert_eq!(cell_size(10.0, 53), CELL_MIN);
+        assert_eq!(cell_size(10_000.0, 53), CELL_MAX);
+    }
+
+    #[test]
     fn month_labels_skip_partial_first_month() {
         let start = day(2026, 1, 4); // Sunday, Jan 1 is before it
         let today = day(2026, 3, 31);
         let labels = month_labels(start, today);
-        assert_eq!(labels, vec![(4, "2月".to_string()), (8, "3月".to_string())]);
+        assert_eq!(labels, vec![(4, "2".to_string()), (8, "3".to_string())]);
     }
 
     #[gpui::test]
@@ -487,11 +512,13 @@ mod tests {
         let first_cell = grid_start(today);
         let events = Rc::new(RefCell::new(Vec::new()));
         let hover_bounds = Rc::new(RefCell::new(Bounds::default()));
+        let measured = Rc::new(Cell::new(Bounds::default()));
         let tooltip_seen = Rc::new(Cell::new(false));
         let render_count = Rc::new(Cell::new(0));
         let view = cx.add_window({
             let events = events.clone();
             let hover_bounds = hover_bounds.clone();
+            let measured = measured.clone();
             let tooltip_seen = tooltip_seen.clone();
             let render_count = render_count.clone();
             move |_window, _cx| HeatmapHarness {
@@ -503,20 +530,33 @@ mod tests {
                         ..Default::default()
                     },
                 )]),
+                bounds: Bounds::default(),
                 hover: None,
                 events,
                 hover_bounds,
+                measured,
                 tooltip_seen,
                 render_count,
             }
         });
         let any_window = AnyWindowHandle::from(view);
 
-        // The harness nests the heatmap under a 200px-tall padding, so the
-        // first cell sits at (GUTTER=30, 200 + month row 16 + gap 4) and is
-        // 11x11px; (35, 225) is its center.
+        // The harness nests the heatmap under a 200px-tall padding. The first
+        // frame renders with default (empty) bounds; the prepaint callback
+        // reports the real card width, and one more frame converges the grid
+        // onto it - only then are cell coordinates meaningful.
         cx.update_window(any_window, |_, window, cx| {
             window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let m = measured.get();
+            assert!(
+                m.size.width > px(0.0) && m.size.height > px(0.0),
+                "the heatmap should measure its card on the first frame"
+            );
+            // The first column starts at the 30px weekday gutter and the grid
+            // sits below the 200px offset, the 16px month row and the 4px gap;
+            // (35, 225) lands inside the first cell once cells are sized from
+            // the measured width instead of the 4px minimum.
             window.simulate_mouse_move(point(px(35.0), px(225.0)), cx);
             window.draw(cx).clear(cx);
         })

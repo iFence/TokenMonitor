@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use chrono::{NaiveDate, Utc};
 use gpui::{
-    div, px, AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, Window,
+    div, px, AnyElement, Bounds, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
+    Pixels, StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::{h_flex, v_flex, StyledExt};
 
@@ -35,7 +35,14 @@ pub fn render_page(
             v_flex()
                 .gap_4()
                 .child(summary_panel(&stats, cx))
-                .child(heatmap_card(&snap.days, hover, &on_hover, &on_resize, cx))
+                .child(heatmap_card(
+                    &snap.days,
+                    app.state.report.heatmap_bounds,
+                    hover,
+                    &on_hover,
+                    &on_resize,
+                    cx,
+                ))
                 .into_any_element()
         }
         None => empty_hint("加载中…", p.muted_foreground),
@@ -73,12 +80,24 @@ fn hover_callback(cx: &Context<RTokenApp>) -> Rc<HoverCallback> {
     })
 }
 
-/// Re-render the page when the heatmap measures a new width (window resize),
-/// so the grid's cell size follows the card.
+/// Re-render the page when the heatmap's measured bounds change (window
+/// resize / card reflow), so the grid's cell size and tooltip anchor follow
+/// the card. Change detection makes the loop converge: after the re-render
+/// uses the stored bounds, prepaint reports the same bounds and stops
+/// notifying.
 fn resize_callback(cx: &Context<RTokenApp>) -> Rc<ResizeCallback> {
     let weak = cx.weak_entity();
-    Rc::new(move |_window, cx| {
-        let _ = weak.update(cx, |_, cx| cx.notify());
+    Rc::new(move |bounds, _window, cx| {
+        let _ = weak.update(cx, |app, cx| {
+            let prev = app.state.report.heatmap_bounds;
+            if (prev.size.width.as_f32() - bounds.size.width.as_f32()).abs() > 0.5
+                || (prev.origin.x.as_f32() - bounds.origin.x.as_f32()).abs() > 0.5
+                || (prev.origin.y.as_f32() - bounds.origin.y.as_f32()).abs() > 0.5
+            {
+                app.state.report.heatmap_bounds = bounds;
+                cx.notify();
+            }
+        });
     })
 }
 
@@ -144,6 +163,7 @@ fn busiest_label(stats: &ReportStats) -> String {
 /// The heatmap card: header with legend on the right, grid below.
 fn heatmap_card(
     days: &[(NaiveDate, SumStats)],
+    bounds: Bounds<Pixels>,
     hover: Option<ReportHover>,
     on_hover: &Rc<HoverCallback>,
     on_resize: &Rc<ResizeCallback>,
@@ -172,7 +192,7 @@ fn heatmap_card(
         .child(if days.is_empty() {
             empty_hint("暂无数据，扫描完成后将在这里显示热力图", p.muted_foreground)
         } else {
-            ContributionHeatmap::new(days.to_vec()).render(hover, on_hover, on_resize, cx)
+            ContributionHeatmap::new(days.to_vec()).render(bounds, hover, on_hover, on_resize, cx)
         })
         .into_any_element()
 }

@@ -39,8 +39,8 @@ pub fn run() -> anyhow::Result<()> {
                     ..Default::default()
                 }),
                 // Measured from the running window (836x671 at scale factor
-                // 1.0); the report heatmap needs ~827px of width, so this is
-                // also the narrowest width at which it fits without clipping.
+                // 1.0). The report heatmap scales its cells to the card
+                // width, so this is a comfort floor, not a hard requirement.
                 window_min_size: Some(size(px(836.0), px(671.0))),
                 ..Default::default()
             },

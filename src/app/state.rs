@@ -330,6 +330,10 @@ pub struct ReportSnapshot {
 #[derive(Debug, Clone, Default)]
 pub struct ReportState {
     pub data: Option<ReportSnapshot>,
+    /// Last measured heatmap card bounds (window coords), fed back into the
+    /// next render so the grid's cell size and the tooltip anchor track the
+    /// card across window resizes and layout reflows.
+    pub heatmap_bounds: Bounds<Pixels>,
 }
 
 /// The heatmap cell currently under the mouse: its date, stats, and window
