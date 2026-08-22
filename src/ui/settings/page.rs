@@ -12,7 +12,6 @@ use gpui::{
     StyleRefinement, Styled, WeakEntity, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::checkbox::Checkbox;
 use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
 use gpui_component::text::TextView;
 use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
@@ -20,7 +19,6 @@ use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 use crate::app::app::RTokenApp;
 use crate::app::state::ScanInterval;
 use crate::app::update_check::UpdateState;
-use crate::core::model::{Provider, ProviderEntry};
 
 use crate::ui::page_shell;
 
@@ -38,28 +36,24 @@ pub fn render_page(
                 .flex_1()
                 .min_h_0()
                 .min_w_0()
-                .child(settings(&weak, app, panel_bg)),
+                .child(settings(&weak, panel_bg)),
         )
         .into_any_element()
 }
 
-/// The full settings instance: three pages rendered through gpui_component's
+/// The full settings instance: pages rendered through gpui_component's
 /// `Settings` sidebar + scrollable group layout.
 ///
 /// The sidebar is painted with the panel background so the sidebar blends
 /// seamlessly with the rest of the page rather than it reading as a darker
 /// (near-black) column.
-fn settings(weak: &WeakEntity<RTokenApp>, app: &RTokenApp, panel_bg: Hsla) -> impl IntoElement {
+fn settings(weak: &WeakEntity<RTokenApp>, panel_bg: Hsla) -> impl IntoElement {
     let sidebar_style = StyleRefinement::default().bg(panel_bg);
 
     Settings::new("rtoken-settings")
         .default_selected_index(Default::default())
         .sidebar_style(&sidebar_style)
-        .pages([
-            general_page(weak),
-            applications_page(weak, &app.state.provider_selection.entries),
-            about_page(weak),
-        ])
+        .pages([general_page(weak), about_page(weak)])
 }
 
 /// "通用": app-wide behavior settings (rescan interval).
@@ -109,64 +103,6 @@ fn scan_interval_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedStrin
             }
         },
     )
-}
-
-/// "应用": every tracked app with a keep toggle and up/down reordering.
-fn applications_page(weak: &WeakEntity<RTokenApp>, entries: &[ProviderEntry]) -> SettingPage {
-    let last = entries.len().saturating_sub(1);
-    let items: Vec<SettingItem> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, entry)| application_item(weak, entry.provider, entry.enabled, i, last))
-        .collect();
-
-    SettingPage::new("应用")
-        .icon(IconName::Frame)
-        .description("选择要追踪的应用，以及它们在仪表盘上的显示顺序。")
-        .group(SettingGroup::new().items(items))
-}
-
-/// One application row: a keep checkbox plus up/down reorder buttons.
-fn application_item(
-    weak: &WeakEntity<RTokenApp>,
-    provider: Provider,
-    enabled: bool,
-    i: usize,
-    last: usize,
-) -> SettingItem {
-    let weak = weak.clone();
-    SettingItem::render(move |_, _window: &mut Window, _cx: &mut App| {
-        let weak = weak.clone();
-        let id = provider.id();
-        h_flex()
-            .gap_2()
-            .items_center()
-            .child(
-                Checkbox::new(format!("app-toggle-{id}"))
-                    .checked(enabled)
-                    .label(provider.display_name())
-                    .on_click({
-                        let weak = weak.clone();
-                        move |checked, window: &mut Window, cx: &mut App| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_provider_enabled(provider, *checked, window, cx);
-                            });
-                        }
-                    }),
-            )
-            .child(div().flex_1())
-            .child(if i == 0 {
-                disabled_reorder(provider, -1)
-            } else {
-                reorder_button(&weak, provider, -1)
-            })
-            .child(if i == last {
-                disabled_reorder(provider, 1)
-            } else {
-                reorder_button(&weak, provider, 1)
-            })
-            .into_any_element()
-    })
 }
 
 /// "关于": app name, version, description, and the auto-update controls.
@@ -367,31 +303,4 @@ fn skip_update_button(weak: &WeakEntity<RTokenApp>) -> Button {
         .on_click(move |_, _: &mut Window, cx: &mut App| {
             let _ = weak.update(cx, |this, cx| this.skip_update(cx));
         })
-}
-
-fn reorder_button(weak: &WeakEntity<RTokenApp>, provider: Provider, dir: isize) -> Button {
-    let icon = if dir < 0 {
-        IconName::ChevronUp
-    } else {
-        IconName::ChevronDown
-    };
-    let weak = weak.clone();
-    Button::new(format!("app-move-{}-{}", provider.id(), dir))
-        .ghost()
-        .icon(icon)
-        .on_click(move |_, window: &mut Window, cx: &mut App| {
-            let _ = weak.update(cx, |this, cx| this.move_provider(provider, dir, window, cx));
-        })
-}
-
-fn disabled_reorder(provider: Provider, dir: isize) -> Button {
-    let icon = if dir < 0 {
-        IconName::ChevronUp
-    } else {
-        IconName::ChevronDown
-    };
-    Button::new(format!("app-move-bound-{}-{}", provider.id(), dir))
-        .ghost()
-        .icon(icon)
-        .disabled(true)
 }

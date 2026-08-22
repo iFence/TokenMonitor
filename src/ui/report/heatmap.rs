@@ -426,8 +426,9 @@ mod tests {
                         cx.notify();
                     });
                 });
-            let on_resize: Rc<ResizeCallback> = Rc::new(move |bounds, _window, cx| {
-                let _ = weak.update(cx, |view, cx| {
+            let on_resize: Rc<ResizeCallback> = Rc::new(move |bounds, window, cx| {
+                let weak = weak.clone();
+                let _ = weak.update(cx, |view, _cx| {
                     view.measured.set(bounds);
                     let prev = view.bounds;
                     if (prev.size.width.as_f32() - bounds.size.width.as_f32()).abs() > 0.5
@@ -435,7 +436,13 @@ mod tests {
                         || (prev.origin.y.as_f32() - bounds.origin.y.as_f32()).abs() > 0.5
                     {
                         view.bounds = bounds;
-                        cx.notify();
+                        // Mirror `page.rs::resize_callback`: prepaint runs
+                        // mid-draw where notify is dropped, so defer the
+                        // notify to the next frame.
+                        let next = weak.clone();
+                        window.on_next_frame(move |_window, cx| {
+                            let _ = next.update(cx, |_, cx| cx.notify());
+                        });
                     }
                 });
             });

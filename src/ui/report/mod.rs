@@ -1,7 +1,7 @@
-//! Report page: a usage summary panel plus a native contribution-style
-//! heatmap of the last 365 days.
+//! Report content: a usage summary panel plus a native contribution-style
+//! heatmap of the last 365 days. Rendered as a section of the dashboard page.
 
-pub mod page;
+pub mod section;
 
 mod heatmap;
 mod stats;

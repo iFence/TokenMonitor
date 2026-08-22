@@ -1,16 +1,18 @@
-//! Dashboard page: time-range tabs + provider usage card grid.
+//! Dashboard page: time-range tabs, the report section (summary + heatmap) on
+//! top, and the auto-discovered agent usage cards below.
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
+    div, AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::tab::{Tab, TabBar};
-use gpui_component::{h_flex, v_flex};
+use gpui_component::{h_flex, v_flex, StyledExt};
 
 use crate::app::app::RTokenApp;
 use crate::app::state::TimeTab;
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
+use crate::ui::report::section::{empty_hint, report_section};
 
 use super::card::provider_card;
 
@@ -23,7 +25,24 @@ pub fn render_page(
         .flex_1()
         .min_h_0()
         .child(tab_bar(app, cx))
-        .child(card_grid(app, cx))
+        .child(content(app, cx))
+        .into_any_element()
+}
+
+/// Scrollable page body: report section (fixed 365-day overview) on top, then
+/// the per-agent usage cards for the selected time range.
+fn content(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
+    let report = report_section(app, cx);
+    let agents = agent_section(app, cx);
+    v_flex()
+        .id("dashboard-content")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .p_4()
+        .gap_4()
+        .child(report)
+        .child(agents)
         .into_any_element()
 }
 
@@ -61,44 +80,41 @@ fn tab_bar(app: &RTokenApp, cx: &Context<RTokenApp>) -> impl IntoElement {
         )
 }
 
-/// Two-column masonry of provider cards. Cards keep their natural height and
-/// are dropped into the currently-shorter column, so a short (no-data) card
-/// fills the vertical gap left by a taller neighbor instead of a rigid row grid
-/// that stretches every card to its row's tallest card.
-fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoElement {
+/// The "Agent 用量" section: only agents with recorded usage in the selected
+/// window are shown, in cost-descending order (as returned by the DB query).
+fn agent_section(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
+    let p = crate::ui::palette(cx);
     let tab_label = app.state.time_tab.label();
-    let providers = app.state.provider_selection.enabled();
+    let used: Vec<(Provider, SumStats)> = app
+        .state
+        .by_provider
+        .iter()
+        .filter(|(_, s)| s.records > 0)
+        .map(|(p, s)| (*p, *s))
+        .collect();
 
-    // Greedy masonry: assign each card to the shorter column, using a height
-    // hint so cards with a per-model section balance across both columns.
-    let mut columns: [Vec<(Provider, SumStats)>; 2] = [Vec::new(), Vec::new()];
-    let mut column_heights = [0u64, 0u64];
-    for provider in providers {
-        let stats = app
-            .state
-            .by_provider
-            .iter()
-            .find(|(p, _)| *p == provider)
-            .map(|(_, s)| *s)
-            .unwrap_or_default();
-        let models = app.state.by_provider_model.get(&provider);
-        let column = if column_heights[0] <= column_heights[1] {
-            0
-        } else {
-            1
-        };
-        column_heights[column] += card_height_hint(models);
-        columns[column].push((provider, stats));
-    }
+    let grid: AnyElement = if used.is_empty() {
+        empty_hint("所选时间范围内暂无 Agent 使用记录", p.muted_foreground)
+    } else {
+        // Greedy masonry: assign each card to the shorter column, using a
+        // height hint so cards with a per-model section balance across columns.
+        let mut columns: [Vec<(Provider, SumStats)>; 2] = [Vec::new(), Vec::new()];
+        let mut column_heights = [0u64, 0u64];
+        for (provider, stats) in &used {
+            let models = app.state.by_provider_model.get(provider);
+            let column = if column_heights[0] <= column_heights[1] {
+                0
+            } else {
+                1
+            };
+            column_heights[column] += card_height_hint(models);
+            columns[column].push((*provider, *stats));
+        }
 
-    v_flex()
-        .id("dashboard-grid")
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .p_4()
-        .child(h_flex().items_start().gap_4().children(
-            columns.iter().filter(|c| !c.is_empty()).map(|column| {
+        h_flex()
+            .items_start()
+            .gap_4()
+            .children(columns.iter().filter(|c| !c.is_empty()).map(|column| {
                 v_flex()
                     .flex_1()
                     .min_w_0()
@@ -114,8 +130,21 @@ fn card_grid(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> impl IntoEleme
                             tab_label,
                         )
                     }))
-            }),
-        ))
+            }))
+            .into_any_element()
+    };
+
+    v_flex()
+        .gap_3()
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .text_color(p.foreground)
+                .child(format!("Agent 用量（{tab_label}）")),
+        )
+        .child(grid)
+        .into_any_element()
 }
 
 /// Rough relative height of a card, used only to balance the masonry columns.

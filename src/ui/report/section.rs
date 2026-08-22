@@ -1,11 +1,12 @@
-//! Report page: usage summary panel plus the native contribution heatmap.
+//! Report section: usage summary panel plus the native contribution heatmap.
+//! Embedded at the top of the dashboard page; the standalone report page is
+//! gone, so this renders bare content (no page shell or scrolling).
 
 use std::rc::Rc;
 
 use chrono::{NaiveDate, Utc};
 use gpui::{
-    div, px, AnyElement, Bounds, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
-    Pixels, StatefulInteractiveElement, Styled, Window,
+    div, px, AnyElement, Bounds, Context, Hsla, IntoElement, ParentElement, Pixels, Styled,
 };
 use gpui_component::{h_flex, v_flex, StyledExt};
 
@@ -17,11 +18,8 @@ use crate::core::aggregation::SumStats;
 use crate::core::time::east8_local;
 use crate::ui::format::{format_cost_f64, format_tokens_compact_f64};
 
-pub fn render_page(
-    app: &mut RTokenApp,
-    _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
-) -> AnyElement {
+/// The report content: summary cards on top, 365-day heatmap below.
+pub fn report_section(app: &RTokenApp, cx: &Context<RTokenApp>) -> AnyElement {
     let p = crate::ui::palette(cx);
     let data = app.state.report.data.clone();
 
@@ -48,16 +46,7 @@ pub fn render_page(
         None => empty_hint("加载中…", p.muted_foreground),
     };
 
-    v_flex()
-        .id("rtoken-page")
-        .flex_1()
-        .min_w_0()
-        .min_h_0()
-        .overflow_y_scroll()
-        .p_4()
-        .gap_4()
-        .child(content)
-        .into_any_element()
+    v_flex().gap_4().child(content).into_any_element()
 }
 
 /// Wire heatmap hover events into the app-level tooltip state so the view
@@ -84,18 +73,29 @@ fn hover_callback(cx: &Context<RTokenApp>) -> Rc<HoverCallback> {
 /// resize / card reflow), so the grid's cell size and tooltip anchor follow
 /// the card. Change detection makes the loop converge: after the re-render
 /// uses the stored bounds, prepaint reports the same bounds and stops
-/// notifying.
+/// scheduling.
+///
+/// The callback runs inside `on_prepaint`, i.e. mid-draw, where `cx.notify()`
+/// is dropped (GPUI skips scheduling a redraw while the window is drawing), so
+/// the first render of the page would keep the grid at its minimum cell size
+/// until some input forced a redraw. Deferring the notify to the next frame
+/// via [`Window::on_next_frame`] guarantees the grid always re-renders at the
+/// freshly measured size.
 fn resize_callback(cx: &Context<RTokenApp>) -> Rc<ResizeCallback> {
     let weak = cx.weak_entity();
-    Rc::new(move |bounds, _window, cx| {
-        let _ = weak.update(cx, |app, cx| {
+    Rc::new(move |bounds, window, cx| {
+        let weak = weak.clone();
+        let _ = weak.update(cx, |app, _cx| {
             let prev = app.state.report.heatmap_bounds;
             if (prev.size.width.as_f32() - bounds.size.width.as_f32()).abs() > 0.5
                 || (prev.origin.x.as_f32() - bounds.origin.x.as_f32()).abs() > 0.5
                 || (prev.origin.y.as_f32() - bounds.origin.y.as_f32()).abs() > 0.5
             {
                 app.state.report.heatmap_bounds = bounds;
-                cx.notify();
+                let next = weak.clone();
+                window.on_next_frame(move |_window, cx| {
+                    let _ = next.update(cx, |_, cx| cx.notify());
+                });
             }
         });
     })
@@ -197,7 +197,7 @@ fn heatmap_card(
         .into_any_element()
 }
 
-fn empty_hint(text: &str, color: Hsla) -> AnyElement {
+pub(crate) fn empty_hint(text: &str, color: Hsla) -> AnyElement {
     div()
         .p_4()
         .text_sm()

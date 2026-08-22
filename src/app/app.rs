@@ -15,7 +15,7 @@ use gpui_component::{v_flex, IndexPath};
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
 use crate::core::aggregation::SumStats;
-use crate::core::model::{Provider, ProviderSelection, TimeWindow};
+use crate::core::model::{Provider, TimeWindow};
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
 use crate::storage::sqlite;
@@ -69,7 +69,6 @@ impl RTokenApp {
             scheduler::start_scheduler(collector.clone(), scan_interval.clone(), scheduler_wake_rx);
         let (view_tx, view_rx) = unbounded();
 
-        let selection = collector.selection();
         let check_updates_on_startup = collector.check_updates_on_startup();
         let skipped_update_version = collector.skipped_update_version();
 
@@ -84,7 +83,7 @@ impl RTokenApp {
             )
         });
         let mut chart_app_options = vec![ChartApp::All];
-        chart_app_options.extend(selection.enabled().into_iter().map(ChartApp::One));
+        chart_app_options.extend(Provider::ALL.into_iter().map(ChartApp::One));
         let chart_app_select = cx
             .new(|cx| SelectState::new(chart_app_options, Some(IndexPath::default()), window, cx));
         let chart_range_select = cx.new(|cx| {
@@ -117,7 +116,6 @@ impl RTokenApp {
             scan_interval,
             scheduler_wake,
         };
-        app.state.provider_selection = selection;
         app.sync_chart_app_select(window, cx);
 
         // Dispatch dropdown / date-picker events back into app handlers.
@@ -233,7 +231,7 @@ impl RTokenApp {
     pub fn select_page(&mut self, page: ActivePage, cx: &mut Context<Self>) {
         self.state.active_page = page;
         self.state.report_hover = None;
-        if page == ActivePage::Charts || page == ActivePage::Report {
+        if page == ActivePage::Charts {
             self.refresh_view(cx);
         }
         cx.notify();
@@ -302,85 +300,11 @@ impl RTokenApp {
         cx.notify();
     }
 
-    /// Toggle whether a provider is tracked (the keep checkbox in settings).
-    pub fn set_provider_enabled(
-        &mut self,
-        provider: Provider,
-        enabled: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut selection = self.state.provider_selection.clone();
-        selection.set_enabled(provider, enabled);
-        self.apply_provider_selection(selection, window, cx);
-    }
-
-    /// Move a provider up (`dir < 0`) or down (`dir > 0`) in the app order.
-    pub fn move_provider(
-        &mut self,
-        provider: Provider,
-        dir: isize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mut selection = self.state.provider_selection.clone();
-        selection.move_entry(provider, dir);
-        self.apply_provider_selection(selection, window, cx);
-    }
-
-    /// Persist a new selection, rebuild scan sources, and refresh the view.
-    fn apply_provider_selection(
-        &mut self,
-        selection: ProviderSelection,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Only a newly *enabled* provider needs a fresh scan to collect data it
-        // hasn't been scanned for. Disabling just hides already-collected rows
-        // and reordering only changes display order, so both are fully handled
-        // by the view refresh below.
-        let newly_enabled = {
-            let old = self.state.provider_selection.enabled();
-            selection.enabled().iter().any(|p| !old.contains(p))
-        };
-
-        self.state.provider_selection = selection.clone();
-
-        // Drop UI state that points at a now-disabled provider.
-        if let Some(expanded) = self.state.expanded_provider {
-            if !selection.is_enabled(expanded) {
-                self.state.expanded_provider = None;
-            }
-        }
-        // Drop the per-model app filter if it points at a now-disabled app.
-        if let ChartApp::One(provider) = self.state.charts.app {
-            if !selection.is_enabled(provider) {
-                self.state.charts.app = ChartApp::All;
-            }
-        }
-
-        if let Err(e) = self.collector.set_selection(selection) {
-            self.state.last_error = Some(format!("save app selection: {e}"));
-        }
-        self.sync_chart_app_select(window, cx);
-        if newly_enabled {
-            self.trigger_scan(cx);
-        }
-        self.refresh_view(cx);
-        cx.notify();
-    }
-
-    /// Rebuild the charts app dropdown ("全部" + enabled apps) from the current
-    /// selection and re-select the active app filter.
+    /// Rebuild the charts app dropdown ("全部" + every provider) and re-select
+    /// the active app filter.
     fn sync_chart_app_select(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut options = vec![ChartApp::All];
-        options.extend(
-            self.state
-                .provider_selection
-                .enabled()
-                .into_iter()
-                .map(ChartApp::One),
-        );
+        options.extend(Provider::ALL.into_iter().map(ChartApp::One));
         let selected = self.state.charts.app;
         self.chart_app_select.update(cx, |select, cx| {
             select.set_items(options, window, cx);
@@ -477,20 +401,16 @@ impl RTokenApp {
         } else {
             None
         };
-        let report = if self.state.active_page == ActivePage::Report {
-            Some(TimeWindow::last_n_days(365, now))
-        } else {
-            None
-        };
-        let enabled = self.state.provider_selection.enabled();
+        // The report section is embedded in the dashboard, so its 365-day
+        // snapshot is always loaded alongside the window aggregates.
+        let report = Some(TimeWindow::last_n_days(365, now));
         let tx = self.view_tx.clone();
 
         std::thread::Builder::new()
             .name("rtoken-aggregate".into())
             .spawn(move || {
-                let snapshot = compute_view_snapshot(
-                    seq, time_tab, &db_path, window, charts, report, &enabled,
-                );
+                let snapshot =
+                    compute_view_snapshot(seq, time_tab, &db_path, window, charts, report);
                 let _ = tx.send_blocking(snapshot);
             })
             .expect("spawn aggregate thread");
@@ -531,7 +451,6 @@ fn compute_view_snapshot(
     window: TimeWindow,
     charts: Option<(TimeWindow, ChartApp)>,
     report: Option<TimeWindow>,
-    enabled: &[Provider],
 ) -> ViewSnapshot {
     let mut snap = ViewSnapshot {
         seq,
@@ -570,7 +489,7 @@ fn compute_view_snapshot(
         Err(e) => snap.error = Some(format!("query failed: {e}")),
     }
     if let Some((chart_window, app)) = charts {
-        snap.charts = Some(compute_chart_snapshot(&repo, chart_window, app, enabled));
+        snap.charts = Some(compute_chart_snapshot(&repo, chart_window, app));
     }
     if let Some(report_window) = report {
         snap.report = Some(compute_report_snapshot(&repo, report_window));
@@ -599,10 +518,9 @@ fn compute_chart_snapshot(
     repo: &UsageRepo<'_>,
     window: TimeWindow,
     app: ChartApp,
-    enabled: &[Provider],
 ) -> ChartsSnapshot {
     let mut snap = ChartsSnapshot::default();
-    for &p in enabled {
+    for &p in &Provider::ALL {
         if let Ok(series) = repo.daily_series_by_provider(p, &window) {
             snap.provider_series.push((p, series));
         }
@@ -610,7 +528,7 @@ fn compute_chart_snapshot(
     snap.model_series = match app {
         ChartApp::All => {
             let mut merged: BTreeMap<String, Vec<(String, SumStats)>> = BTreeMap::new();
-            for &p in enabled {
+            for &p in &Provider::ALL {
                 if let Ok(models) = repo.daily_series_by_provider_model(p, &window) {
                     merge_model_series(&mut merged, models);
                 }
@@ -666,6 +584,11 @@ impl Render for RTokenApp {
             // near-black too; lift them to the card surface so they sit above
             // the panel without reading as a black void.
             theme.tokens.popover = ui::hsla_from_hex(0x262b33).into();
+            // Segmented tab bars (dashboard time range, report filter) render
+            // their track and active pill from these tokens; both default to
+            // near-black, so lift them to the card/main background.
+            theme.tokens.tab_bar_segmented = ui::hsla_from_hex(0x262b33).into();
+            theme.tokens.background = ui::hsla_from_hex(0x1b1e24).into();
         }
 
         let p = crate::ui::palette(cx);

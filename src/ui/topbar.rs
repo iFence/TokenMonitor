@@ -81,13 +81,6 @@ pub fn render_topbar(
                 .child(nav_icon(
                     app,
                     cx,
-                    "nav-report",
-                    IconName::Calendar,
-                    ActivePage::Report,
-                ))
-                .child(nav_icon(
-                    app,
-                    cx,
                     "nav-settings",
                     IconName::Settings,
                     ActivePage::Settings,

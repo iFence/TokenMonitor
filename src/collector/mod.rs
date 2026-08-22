@@ -11,16 +11,13 @@ use anyhow::Result;
 use async_channel::{unbounded, Receiver, Sender};
 use rusqlite::Connection;
 
-use crate::core::model::{Provider, ProviderSelection};
+use crate::core::model::Provider;
 use crate::core::pricing::{Pricer, PRICING_VERSION, PRICING_VERSION_KEY};
-use crate::providers::{build_sources, configs_for, ProviderSource};
+use crate::providers::{build_sources, default_configs, ProviderSource};
 use crate::storage::repository::{SettingsRepo, UsageRepo};
 use crate::storage::sqlite;
 
 use scanner::{scan_all, scan_one, ScanSummary};
-
-/// Settings key holding the JSON-encoded [`ProviderSelection`].
-const PROVIDER_SELECTION_KEY: &str = "providers.selection";
 
 /// Settings keys for the auto-update preferences.
 const CHECK_UPDATES_ON_STARTUP_KEY: &str = "update.check_on_startup";
@@ -47,7 +44,6 @@ pub struct Collector {
     db: Arc<Mutex<Connection>>,
     tx: Sender<CollectorEvent>,
     rx: Receiver<CollectorEvent>,
-    selection: RwLock<ProviderSelection>,
     sources: RwLock<Arc<Vec<Box<dyn ProviderSource>>>>,
 }
 
@@ -68,14 +64,12 @@ impl Collector {
             }
         }
         let (tx, rx) = unbounded();
-        let selection = load_provider_selection(&conn)?;
-        let sources = Arc::new(build_sources(&configs_for(&selection)));
+        let sources = Arc::new(build_sources(&default_configs()));
         Ok(Collector {
             db_path: db_path.to_path_buf(),
             db: Arc::new(Mutex::new(conn)),
             tx,
             rx,
-            selection: RwLock::new(selection),
             sources: RwLock::new(sources),
         })
     }
@@ -134,27 +128,6 @@ impl Collector {
         self.sources.read().expect("sources lock poisoned").clone()
     }
 
-    /// The current user app selection (order + enabled flags).
-    pub fn selection(&self) -> ProviderSelection {
-        self.selection
-            .read()
-            .expect("selection lock poisoned")
-            .clone()
-    }
-
-    /// Replace the app selection: persist it and rebuild the enabled sources so
-    /// the next scan reflects the new order and enabled set.
-    pub fn set_selection(&self, selection: ProviderSelection) -> Result<()> {
-        {
-            let conn = self.db.lock().expect("db lock poisoned");
-            save_provider_selection(&conn, &selection)?;
-        }
-        let sources = Arc::new(build_sources(&configs_for(&selection)));
-        *self.sources.write().expect("sources lock poisoned") = sources;
-        *self.selection.write().expect("selection lock poisoned") = selection;
-        Ok(())
-    }
-
     /// Whether to check for updates on startup (defaults to `true`).
     pub fn check_updates_on_startup(&self) -> bool {
         let conn = self.db.lock().expect("db lock poisoned");
@@ -207,28 +180,4 @@ impl Collector {
             None => repo.remove(SKIPPED_UPDATE_VERSION_KEY),
         }
     }
-}
-
-/// Load the persisted app selection, normalizing against the known provider set
-/// so a fresh DB (or a partially written value) yields a valid selection.
-fn load_provider_selection(conn: &Connection) -> Result<ProviderSelection> {
-    let mut selection = match SettingsRepo::new(conn).get(PROVIDER_SELECTION_KEY)? {
-        Some(json) => match serde_json::from_str::<ProviderSelection>(&json) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!(
-                    "TokenMonitor: ignoring corrupt provider selection ({e}); using defaults"
-                );
-                ProviderSelection::default()
-            }
-        },
-        None => ProviderSelection::default(),
-    };
-    selection.normalize();
-    Ok(selection)
-}
-
-fn save_provider_selection(conn: &Connection, selection: &ProviderSelection) -> Result<()> {
-    let json = serde_json::to_string(selection)?;
-    SettingsRepo::new(conn).set(PROVIDER_SELECTION_KEY, &json)
 }

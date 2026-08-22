@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use gpui::{Bounds, Pixels};
 
 use crate::core::aggregation::SumStats;
-use crate::core::model::{Period, Provider, ProviderSelection, TimeWindow};
+use crate::core::model::{Period, Provider, TimeWindow};
 
 /// The active navigation page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -14,7 +14,6 @@ pub enum ActivePage {
     Project,
     Settings,
     Charts,
-    Report,
 }
 
 /// Dashboard time-range tab (a UI concept; not persisted, decoupled from the
@@ -143,7 +142,6 @@ pub struct AppState {
     pub time_tab: TimeTab,
     pub expanded_provider: Option<Provider>,
     pub selected_project: Option<String>,
-    pub provider_selection: ProviderSelection,
     pub scan_status: ScanStatus,
     pub last_error: Option<String>,
     pub summary: Option<SumStats>,
