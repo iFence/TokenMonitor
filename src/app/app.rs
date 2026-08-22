@@ -12,6 +12,7 @@ use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::select::{SelectEvent, SelectState};
 use gpui_component::{v_flex, Colorize, IndexPath};
+use rusqlite::Connection;
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
 use crate::core::aggregation::SumStats;
@@ -509,23 +510,17 @@ fn compute_view_snapshot(
         snap.charts = Some(compute_chart_snapshot(&repo, chart_window, app));
     }
     if let Some(report_window) = report {
-        snap.report = Some(compute_report_snapshot(&repo, report_window));
+        snap.report = Some(compute_report_snapshot(&conn, report_window));
     }
     snap
 }
 
-/// Compute the report page's raw daily series (last 365 East-8 calendar days).
-fn compute_report_snapshot(repo: &UsageRepo<'_>, window: TimeWindow) -> ReportSnapshot {
+/// Compute the report page's raw daily series (last 365 East-8 calendar days),
+/// reusing the headless `report::data` loader shared with the TUI frontend.
+fn compute_report_snapshot(conn: &Connection, window: TimeWindow) -> ReportSnapshot {
     let mut snap = ReportSnapshot::default();
-    if let Ok(series) = repo.daily_series(&window) {
-        snap.days = series
-            .into_iter()
-            .filter_map(|(key, stats)| {
-                NaiveDate::parse_from_str(&key, "%Y-%m-%d")
-                    .ok()
-                    .map(|date| (date, stats))
-            })
-            .collect();
+    if let Ok(days) = crate::report::data::load_report_days(conn, &window) {
+        snap.days = days;
     }
     snap
 }

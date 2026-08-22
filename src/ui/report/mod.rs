@@ -4,7 +4,5 @@
 pub mod section;
 
 mod heatmap;
-mod stats;
 
 pub use heatmap::ContributionHeatmap;
-pub use stats::{report_stats, ReportStats};

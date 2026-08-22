@@ -20,7 +20,7 @@ use crate::core::model::Provider;
 
 use super::compact::CompactBarChart;
 use super::DonutChart;
-use crate::ui::format::{format_cost_f64, format_percent_f64, format_tokens_compact_f64};
+use crate::format::{format_cost_f64, format_percent_f64, format_tokens_compact_f64};
 
 pub fn render_page(
     app: &mut TokenMonitorApp,

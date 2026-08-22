@@ -20,6 +20,32 @@ path = "src/lib.rs"
 # ~115MB vs ~265MB floor). See memory notes before renaming back.
 name = "tokenmonitor-app"
 path = "src/main.rs"
+required-features = ["ui"]
+
+[[bin]]
+# Headless terminal frontend for servers / machines without a display.
+# Only builds with `--features tui` (skipped by default so the desktop binary
+# never drags ratatui in).
+name = "tokenmonitor-tui"
+path = "src/bin/tokenmonitor-tui.rs"
+required-features = ["tui"]
+
+# GPUI 桌面版与 ratatui TUI 版互斥：
+# - `ui`  (default)：桌面版，含 GPUI 渲染栈。
+# - `tui`           ：无显示环境下编译 TUI 二进制：`--no-default-features --features tui`。
+[features]
+default = ["ui"]
+ui = [
+    "dep:gpui",
+    "dep:gpui_platform",
+    "dep:gpui-component",
+    "dep:gpui-component-assets",
+    "dep:http_client",
+    "dep:reqwest_client",
+    "dep:semver",
+    "dep:futures",
+]
+tui = ["dep:ratatui"]
 
 [dependencies]
 anyhow = "1.0"
@@ -36,20 +62,24 @@ async-channel = "2.5"
 # allocator's high-water mark after scans / view refreshes.
 mimalloc = "0.1"
 # Update check: version comparison + async HTTP for the GitHub releases API.
-semver = "1"
-futures = "0.3"
+# `ui`-only: the TUI frontend does not check for updates.
+semver = { version = "1", optional = true }
+futures = { version = "0.3", optional = true }
 # DeepSeek harness writes `~/.dsh/sessions/**/*.jsonl.zstd`; streaming decoder.
 zstd = "0.13"
+# Headless terminal frontend (server / no-display machines).
+ratatui = { version = "0.29", optional = true }
 
 # GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
 # 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+# 全部 optional：由 `ui` feature 启用，TUI 构建（--no-default-features）不编译。
+gpui = { git = "https://github.com/zed-industries/zed", optional = true }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"], optional = true }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", optional = true }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", optional = true }
 # 与 gpui 共用同一 git source（Cargo.lock 锁定同一 rev，勿加 rev=）。
-http_client = { git = "https://github.com/zed-industries/zed" }
-reqwest_client = { git = "https://github.com/zed-industries/zed" }
+http_client = { git = "https://github.com/zed-industries/zed", optional = true }
+reqwest_client = { git = "https://github.com/zed-industries/zed", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

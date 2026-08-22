@@ -1,7 +1,8 @@
-//! Pure summary statistics for the report page.
+//! Pure summary statistics for the report view.
 //!
-//! No GPUI imports here: everything is plain date arithmetic over the daily
-//! series, so the streak/busiest-day logic stays unit-testable.
+//! No rendering imports here: everything is plain date arithmetic over the daily
+//! series, so the streak/busiest-day logic stays unit-testable and is shared by
+//! the GPUI and TUI frontends.
 
 use std::collections::BTreeMap;
 

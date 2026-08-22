@@ -15,9 +15,8 @@ use crate::app::app::TokenMonitorApp;
 use crate::app::state::ReportHover;
 use crate::core::aggregation::SumStats;
 use crate::core::time::east8_local;
-use crate::ui::format::{format_cost_f64, format_tokens_compact_f64};
-
-use super::stats::{report_stats, ReportStats};
+use crate::format::{format_cost_f64, format_tokens_compact_f64};
+use crate::report::{report_stats, ReportStats};
 
 /// The report content: summary cards on top, 365-day heatmap below.
 pub fn report_section(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> AnyElement {

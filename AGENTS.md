@@ -4,10 +4,18 @@
 
 TokenMonitor 是一个轻量的 AI 编程工具 Token 用量追踪桌面应用。核心保持干净：`src/core` 是纯 Rust 领域层（无 GPUI 依赖、可单元测试），`src/ui` 只做展示，`src/providers` 负责把各工具非结构化的本地用量数据归一化为 `UsageRecord`。聚合逻辑（`src/core/aggregation`）与 tokei 一致：分类、排序、带合计。
 
+## 双前端（feature 门控）
+
+- `default = ["ui"]`：桌面版 GPUI（bin `tokenmonitor-app`，`required-features = ["ui"]`）。
+- `tui` feature：终端版 ratatui（bin `tokenmonitor-tui`，`required-features = ["tui"]`），用于无显示器的服务器 / headless。构建：`cargo build --release --no-default-features --features tui`。
+- 二者共享**无渲染依赖**的 `src/report/`（`stats.rs` 统计、`heatmap.rs` 热力图几何与分级、`data.rs` 从 SQLite 加载日序列）与 `src/format.rs`（紧凑格式化）。GPUI / ratatui 各自只负责绘制。
+- GPUI 系依赖全部 `optional = true` 归入 `ui`；TUI 构建的运行时依赖图必须无 gpui（用 `cargo tree --edges normal,build` 验证）。
+
 ## 架构规则
 
-- **分层**：`core`（领域）← `providers` / `storage`（适配）← `collector`（编排）← `app` + `ui`（GPUI 展示）。依赖方向只能从外向 core 指向 core，禁止反向。
-- **单 crate**：非 workspace。`lib.rs` 只做 `mod` 声明 + `pub use`；`main.rs` 只做薄入口（调用 `rtoken::app::run()`）。actions 定义在 `src/app/actions.rs`（因 lib + bin 拆分，动作类型必须在 lib 内）。
+- **分层**：`core`（领域）← `providers` / `storage`（适配）← `collector`（编排）← 前端（`app` + `ui` GPUI / `tui` ratatui）。依赖方向只能从外向 core 指向 core，禁止反向。
+- **单 crate**：非 workspace。`lib.rs` 只做 `mod` 声明 + `pub use`，并按 feature 门控：`#[cfg(feature = "ui")] pub mod app/ui;`、`#[cfg(feature = "tui")] pub mod tui;`。`main.rs` 只做薄入口（调用 `tokenmonitor::app::run()`）；`src/bin/tokenmonitor-tui.rs` 同理调用 `tokenmonitor::tui::run()`。actions 定义在 `src/app/actions.rs`（因 lib + bin 拆分，动作类型必须在 lib 内）。
+- **TUI 约定**：入口 `src/tui/mod.rs::run()` 用 `ratatui::try_init()/try_restore()`；复用 `Collector`（`open` / `scan_async` / `events`）与 `scheduler::start_scheduler`（`_wake_tx` sender 必须存活，drop 后调度线程退出）；事件循环 `terminal.draw` + `events.try_recv()` + `event::poll(200ms)`；选中移动/状态机在 `src/tui/app.rs`，绘制在 `src/tui/ui.rs`。
 - **GPUI 约定**：GPUI trait 导入需在每个模块显式列出（不会跨模块带入）；`gpui`/`gpui_platform` 保持与 `gpui-component` 一致的**未固定 rev 的 git URL**，版本只通过提交的 `Cargo.lock` 锁定（**切勿加 `rev =`**，否则产生两个不兼容的 gpui）；`gpui_component::init(cx)` 必须在 UI 创建前调用；根视图包裹 `gpui_component::Root`；`on_click` 回调用提供的 `&mut Window` + 存储的 `WeakEntity`，避免 `update_in`。
 - **模块组织**：一个文件一个职责；生产模块 ≤ 500 行；领域类型统一 `serde` 派生。
 - **数据源适配**：每个 provider 实现 `ProviderSource` trait（`data_dir` / `scan` / `scan_fingerprint`）；新工具只需新增 `src/providers/<name>/` 目录并加入 `all_providers()` 与 `build_sources()`。
@@ -23,6 +31,8 @@ cargo fmt --check
 cargo check --all-targets
 cargo test
 cargo run                # 涉及 UI 变更时
+cargo check --bins --no-default-features --features tui   # 涉及 TUI 变更时
+cargo tree --no-default-features --features tui --edges normal,build  # TUI 图必须无 gpui
 cargo tree -d            # 确认只有一个 gpui / gpui-component git 来源（无 rev）
 ```
 

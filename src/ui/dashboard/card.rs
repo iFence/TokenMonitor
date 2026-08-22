@@ -10,7 +10,7 @@ use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 use crate::app::app::TokenMonitorApp;
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
-use crate::ui::format::{format_cost_usd, format_tokens_compact};
+use crate::format::{format_cost_usd, format_tokens_compact};
 use crate::ui::charts::DonutChart;
 
 /// One provider card: headline totals, cost, cache-hit ring, token details,

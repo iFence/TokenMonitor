@@ -4,7 +4,7 @@ use gpui_component::{h_flex, v_flex};
 
 use crate::app::app::TokenMonitorApp;
 
-use crate::ui::format::format_tokens_compact;
+use crate::format::format_tokens_compact;
 use crate::ui::page_shell;
 
 pub fn render_page(

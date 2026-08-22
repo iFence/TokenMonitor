@@ -2,7 +2,6 @@
 
 pub mod charts;
 pub mod dashboard;
-pub mod format;
 pub mod project;
 pub mod report;
 pub mod settings;

@@ -1,4 +1,5 @@
 //! Display formatting helpers (presentation conventions, not domain logic).
+//! Pure text — shared by the GPUI and TUI frontends.
 
 /// Compact token count: `>=1e8` → "3.5亿", `>=1e6` → "9.1M", `>=1e3` → "641K",
 /// otherwise the raw number.
