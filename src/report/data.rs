@@ -1,12 +1,14 @@
 //! Loading the report's raw daily series from SQLite. Shared by the GPUI and
 //! TUI frontends so both aggregate the same 365-day East-8 view.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use chrono::NaiveDate;
 use rusqlite::Connection;
 
 use crate::core::aggregation::SumStats;
-use crate::core::model::TimeWindow;
+use crate::core::model::{Provider, TimeWindow};
 use crate::storage::repository::UsageRepo;
 
 /// East-8 calendar days with recorded usage inside `window`, chronological
@@ -26,4 +28,30 @@ pub fn load_report_days(
         })
         .collect();
     Ok(days)
+}
+
+/// Per-provider ("agent") aggregates over `window`, sorted by cost descending.
+pub fn load_report_by_provider(
+    conn: &Connection,
+    window: &TimeWindow,
+) -> Result<Vec<(Provider, SumStats)>> {
+    UsageRepo::new(conn).aggregate_by_provider(window)
+}
+
+/// Per-model aggregates across all providers over `window`, sorted by cost
+/// descending.
+pub fn load_report_by_model(
+    conn: &Connection,
+    window: &TimeWindow,
+) -> Result<Vec<(String, SumStats)>> {
+    let by_provider_model = UsageRepo::new(conn).aggregate_by_provider_model(window)?;
+    let mut by_model: BTreeMap<String, SumStats> = BTreeMap::new();
+    for models in by_provider_model.values() {
+        for (model, stats) in models {
+            by_model.entry(model.clone()).or_default().add(stats);
+        }
+    }
+    let mut v: Vec<(String, SumStats)> = by_model.into_iter().collect();
+    v.sort_by(|a, b| b.1.cost_micros.cmp(&a.1.cost_micros));
+    Ok(v)
 }

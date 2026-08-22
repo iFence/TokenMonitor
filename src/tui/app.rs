@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Datelike, Duration, NaiveDate, Utc};
 
 use crate::collector::{Collector, CollectorEvent};
 use crate::core::aggregation::SumStats;
-use crate::core::model::TimeWindow;
+use crate::core::model::{Period, Provider, TimeWindow};
 use crate::core::time::east8_local;
 use crate::report::heatmap::{grid_start, week_count, ROWS};
 
@@ -19,6 +19,63 @@ use crate::report::heatmap::{grid_start, week_count, ROWS};
 pub enum Action {
     Quit,
     None,
+}
+
+/// Selectable time range for the summary cards and the agent/model breakdown.
+/// The heatmap stays a fixed 365-day overview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TuiRange {
+    #[default]
+    Year365,
+    Today,
+    Yesterday,
+    ThisWeek,
+    LastWeek,
+    ThisMonth,
+    ThisYear,
+}
+
+impl TuiRange {
+    pub const ALL: [TuiRange; 7] = [
+        Self::Year365,
+        Self::Today,
+        Self::Yesterday,
+        Self::ThisWeek,
+        Self::LastWeek,
+        Self::ThisMonth,
+        Self::ThisYear,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Year365 => "近365天",
+            Self::Today => "今日",
+            Self::Yesterday => "昨日",
+            Self::ThisWeek => "本周",
+            Self::LastWeek => "上周",
+            Self::ThisMonth => "本月",
+            Self::ThisYear => "本年",
+        }
+    }
+
+    pub fn window(self, now: chrono::DateTime<Utc>) -> TimeWindow {
+        match self {
+            Self::Year365 => TimeWindow::last_n_days(365, now),
+            Self::Today => TimeWindow::current(Period::Day, now),
+            Self::Yesterday => TimeWindow::previous(Period::Day, now),
+            Self::ThisWeek => TimeWindow::current(Period::Week, now),
+            Self::LastWeek => TimeWindow::previous(Period::Week, now),
+            Self::ThisMonth => TimeWindow::current(Period::Month, now),
+            Self::ThisYear => TimeWindow::current_year(now),
+        }
+    }
+
+    /// The next/previous range in cycling order (`dir < 0` goes backwards).
+    pub fn step(self, dir: isize) -> Self {
+        let ix = Self::ALL.iter().position(|r| *r == self).unwrap_or(0);
+        let n = Self::ALL.len() as isize;
+        Self::ALL[((ix as isize + dir).rem_euclid(n)) as usize]
+    }
 }
 
 /// Interactive TUI state: the loaded 365-day report plus grid selection.
@@ -34,6 +91,14 @@ pub struct TuiApp {
     weeks: usize,
     /// Selected grid cell `(week, row)`, row 0 = Sunday.
     selection: (usize, usize),
+    /// Per-provider ("agent") totals over the report window, cost-descending.
+    by_provider: Vec<(Provider, SumStats)>,
+    /// Per-model totals over the report window, cost-descending.
+    by_model: Vec<(String, SumStats)>,
+    /// Selected time range for the summary cards and the breakdown sections.
+    range: TuiRange,
+    /// East-8 days inside the selected range, for the range summary stats.
+    range_days: Vec<(NaiveDate, SumStats)>,
     /// One-line status shown in the header (scan progress / last result).
     pub status: String,
     /// Short summary of the last completed scan.
@@ -51,10 +116,20 @@ impl TuiApp {
             start: Utc::now().date_naive(),
             weeks: 0,
             selection: (0, 0),
+            by_provider: Vec::new(),
+            by_model: Vec::new(),
+            range: TuiRange::default(),
+            range_days: Vec::new(),
             status: "等待扫描…".to_string(),
             last_scan: None,
         };
         let _ = app.reload();
+        // Start the cursor on the most recent day (today) instead of the
+        // grid's first cell.
+        app.selection = (
+            app.weeks.saturating_sub(1),
+            app.today.weekday().num_days_from_sunday() as usize,
+        );
         app
     }
 
@@ -62,8 +137,9 @@ impl TuiApp {
         &self.collector
     }
 
-    /// Re-read the 365-day report series from the database (read-only WAL
-    /// connection, so it never blocks a running scan).
+    /// Re-read the 365-day heatmap series and the selected range's aggregates
+    /// from the database (read-only WAL connection, so it never blocks a
+    /// running scan).
     pub fn reload(&mut self) -> Result<()> {
         let conn = crate::storage::sqlite::open_read(&self.db_path)?;
         let now = Utc::now();
@@ -73,11 +149,24 @@ impl TuiApp {
         self.start = grid_start(self.today);
         self.weeks = week_count(self.start, self.today);
         self.selection.0 = self.selection.0.min(self.weeks.saturating_sub(1));
+        self.reload_range(&conn)?;
         Ok(())
     }
 
-    pub fn days(&self) -> &[(NaiveDate, SumStats)] {
-        &self.days
+    /// Re-read the summary + agent/model aggregates for the selected range.
+    fn reload_range(&mut self, conn: &rusqlite::Connection) -> Result<()> {
+        let window = self.range.window(Utc::now());
+        self.by_provider = crate::report::data::load_report_by_provider(conn, &window)?;
+        self.by_model = crate::report::data::load_report_by_model(conn, &window)?;
+        self.range_days = crate::report::data::load_report_days(conn, &window)?;
+        Ok(())
+    }
+
+    /// Switch to the next/previous time range and reload its aggregates.
+    pub fn cycle_range(&mut self, dir: isize) -> Result<()> {
+        self.range = self.range.step(dir);
+        let conn = crate::storage::sqlite::open_read(&self.db_path)?;
+        self.reload_range(&conn)
     }
 
     pub fn today(&self) -> NaiveDate {
@@ -103,6 +192,23 @@ impl TuiApp {
 
     pub fn day_stats(&self) -> HashMap<NaiveDate, SumStats> {
         self.days.iter().copied().collect()
+    }
+
+    pub fn by_provider(&self) -> &[(Provider, SumStats)] {
+        &self.by_provider
+    }
+
+    pub fn by_model(&self) -> &[(String, SumStats)] {
+        &self.by_model
+    }
+
+    pub fn range(&self) -> TuiRange {
+        self.range
+    }
+
+    /// East-8 days inside the selected range (for the range summary).
+    pub fn range_days(&self) -> &[(NaiveDate, SumStats)] {
+        &self.range_days
     }
 
     /// Apply a collector event, re-loading the report when a scan changed data.
@@ -145,10 +251,17 @@ impl TuiApp {
                 self.collector.scan_async()?;
                 self.status = "手动扫描已触发".to_string();
             }
+            // `t` / `T` cycle the time range for the summary + breakdown.
+            KeyCode::Char('t') if key.modifiers == KeyModifiers::NONE => self.cycle_range(1)?,
+            KeyCode::Char('T') if key.modifiers == KeyModifiers::NONE => self.cycle_range(-1)?,
             KeyCode::Left => self.move_selection(-1, 0),
             KeyCode::Right => self.move_selection(1, 0),
             KeyCode::Up => self.move_selection(0, -1),
             KeyCode::Down => self.move_selection(0, 1),
+            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => self.move_selection(-1, 0),
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => self.move_selection(1, 0),
+            KeyCode::Char('k') if key.modifiers == KeyModifiers::NONE => self.move_selection(0, -1),
+            KeyCode::Char('j') if key.modifiers == KeyModifiers::NONE => self.move_selection(0, 1),
             KeyCode::Home => self.selection.0 = 0,
             KeyCode::End => self.selection.0 = self.weeks.saturating_sub(1),
             _ => {}
