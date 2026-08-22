@@ -7,7 +7,7 @@
 
 ![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=flat-square)
 
-一个基于 **Rust + GPUI** 的 AI 编程工具 **Token 用量追踪**桌面应用。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、Antigravity、CodeBuddy、WorkBuddy、OpenCode、OpenClaw、Qoder、DeepSeek Harness、Pi）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
+一个基于 **Rust** 的 AI 编程工具 **Token 用量追踪**应用，提供 GPUI 桌面版与 ratatui 终端版（TUI）两个前端。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、Antigravity、CodeBuddy、WorkBuddy、OpenCode、OpenClaw、Qoder、DeepSeek Harness、Pi）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
 
 > 灵感与聚合/展示形式参考 [tokei](https://github.com/cclank/tokei)（按类别分组、排序、带合计的汇总表）。
 
@@ -27,27 +27,34 @@
 - **SQLite 持久化**：用量记录（含 fingerprint 去重）、项目、配额、设置
 - **采集管线**：`scanner`（扫描解析）、`watcher`（文件监听）、`scheduler`（定时重扫）
 - **核心领域层**：用量归一化、成本计价、配额追踪、多维度聚合
-- **GPUI 桌面界面**：仪表盘（汇总卡片 + 表格）、图表页（时间范围下拉 + 自定义日期区间）、Project 详情、设置页（应用选择 / 关于）
-- **自动更新**：启动时检查 GitHub Releases，一键下载并安装新版（Windows）
+- **GPUI 桌面界面**：仪表盘（汇总卡片 + 表格 + 365 天热力图/日报）、图表页（时间范围下拉 + 自定义日期区间）、Project 详情、设置页（扫描间隔 / 主题强调色 / 更新检查）
+- **TUI 终端版**（`tokenmonitor-tui`）：无显示器环境 / 服务器下复用同一采集与存储管线，Tab 切换「汇总（热力图 + 应用/模型明细）/ 今日小时视图 / 更新检查」三个面板；`u` 检查更新、`d` 下载、`s` 跳过
+- **命令行参数**：两个前端均支持 `-h/--help`、`-V/--version`；TUI 另有 `-u/--check-update` 一次性检查更新并退出（退出码：0 无更新 · 2 有更新 · 1 出错）
+- **自动更新**：启动时检查 GitHub Releases，桌面版一键下载并安装新版（Windows）；TUI 同样支持检查与下载
 
 ## 目录结构
 
 ```
 src/
-├── main.rs        薄入口
+├── main.rs        薄入口（桌面版，含 --help/--version）
 ├── lib.rs         模块声明 + 重导出
+├── cli.rs         命令行参数解析（两个前端共用）
 ├── app/           GPUI 应用壳（bootstrap、根 Entity、状态、更新检查）
-├── core/          核心领域层（无 GPUI 依赖，纯 Rust + serde）
-│   ├── model/      Usage / Quota / Pricing / Provider / Project / TimeWindow
+├── core/          核心领域层（无渲染依赖，纯 Rust + serde）
+│   ├── model/      Usage / Quota / Pricing / Provider / Project / TimeWindow / ThemeColor
 │   ├── usage/      UsageRecord + 归一化
 │   ├── quota/      配额追踪
 │   ├── pricing/    模型计价与成本计算
-│   └── aggregation/ 多维度聚合
+│   ├── aggregation/ 多维度聚合
+│   └── update.rs    GitHub 更新检查共享逻辑（版本比对、更新说明解析）
 ├── providers/     ProviderSource trait + 各工具数据源适配器
 ├── storage/       SQLite 连接 + repository 模式
 ├── collector/     scanner / watcher / scheduler 采集管线
+├── report/        无渲染依赖的统计 / 热力图几何与分级（两个前端共用）
+├── format/        紧凑格式化（千分位、M/亿 单位）
 ├── platform/      平台相关（Windows 主，macOS/Linux 预留）
-└── ui/            GPUI 视图（dashboard / charts / project / settings）
+├── ui/            GPUI 视图（dashboard / charts / project / settings）
+└── tui/           ratatui 终端前端（app / ui / update）
 ```
 
 ## 构建与运行
@@ -59,10 +66,19 @@ rustup show                    # 应激活 1.95.0-x86_64-pc-windows-msvc
 cargo fmt --check
 cargo check                    # lib + bin
 cargo test                     # 核心单测 + SQLite schema 测试
-cargo run                      # 启动 TokenMonitor 窗口
+cargo run                      # 启动桌面版窗口
 ```
 
-> 首次编译会拉取并编译完整的 GPUI 依赖树（git 依赖来自 zed-industries/zed 与 longbridge/gpui-component），可能需要数分钟到二十分钟。
+> 桌面版首次编译会拉取并编译完整的 GPUI 依赖树（git 依赖来自 zed-industries/zed 与 longbridge/gpui-component），可能需要数分钟到二十分钟。
+
+**终端版（TUI）**——无显示器 / 服务器环境使用，依赖树不包含 GPUI：
+
+```powershell
+cargo build --release --no-default-features --features tui
+.\target\release\tokenmonitor-tui.exe          # 启动 TUI
+.\target\release\tokenmonitor-tui.exe --help   # 查看用法
+.\target\release\tokenmonitor-tui.exe --check-update   # 检查更新并退出
+```
 
 ## 许可
 
