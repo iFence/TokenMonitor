@@ -14,6 +14,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "ui")]
 pub mod app;
+pub mod cli;
 pub mod collector;
 pub mod core;
 pub mod format;

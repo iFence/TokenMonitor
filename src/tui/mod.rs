@@ -12,11 +12,41 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
 use crate::storage::default_db_path;
 use crate::tui::app::{Action, TuiApp};
+
+/// `--check-update`: one-shot update check that prints the result and exits.
+/// Exit codes: 0 = up to date, 2 = newer release available, 1 = check failed.
+pub fn check_update_cli() -> Result<()> {
+    let current =
+        semver::Version::parse(env!("CARGO_PKG_VERSION")).context("parse current version")?;
+    match update::check_update(&current, crate::platform::is_portable()) {
+        Ok(Some(info)) => {
+            println!("当前版本: v{current}");
+            println!("最新版本: v{}", info.latest_version);
+            println!("新版本可用。");
+            println!("下载: {} ({} bytes)", info.asset.name, info.asset.size);
+            if !info.release_notes.trim().is_empty() {
+                println!();
+                println!("更新说明:");
+                println!("{}", info.release_notes.trim());
+            }
+            std::process::exit(2);
+        }
+        Ok(None) => {
+            println!("当前版本: v{current}");
+            println!("已是最新版本。");
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("检查更新失败: {error:#}");
+            std::process::exit(1);
+        }
+    }
+}
 
 /// Entry point for the terminal frontend: owns the collector + periodic
 /// scheduler, and drives the ratatui event loop.
