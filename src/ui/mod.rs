@@ -14,10 +14,11 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window,
 };
 use gpui::{Hsla, Pixels};
-use gpui_component::{v_flex, ActiveTheme, StyledExt};
+use gpui_component::{v_flex, ActiveTheme, Colorize, StyledExt};
 
 use crate::app::app::RTokenApp;
 use crate::app::state::ActivePage;
+use crate::core::model::ThemeColor;
 
 /// Convert an `#rrggbb` hex color to GPUI's `Hsla`. GPUI stores the hue
 /// normalized to 0..=1 (not degrees), so values written as degrees render as
@@ -76,6 +77,24 @@ pub(crate) fn palette(cx: &App) -> Palette {
         card: theme.secondary,
         radius: theme.radius,
     }
+}
+
+/// The accent color of a [`ThemeColor`], as an `Hsla`.
+pub(crate) fn accent_color(color: ThemeColor) -> Hsla {
+    hsla_from_hex(color.accent())
+}
+
+/// A five-shade chart series palette derived from the accent color, lightest to
+/// darkest (mirroring gpui-component's default chart ramp around its base blue).
+pub(crate) fn accent_palette(color: ThemeColor) -> [Hsla; 5] {
+    let base = accent_color(color);
+    [
+        base.lighten(0.4),
+        base.lighten(0.2),
+        base,
+        base.darken(0.2),
+        base.darken(0.4),
+    ]
 }
 
 /// Render the page active in `app.state`.

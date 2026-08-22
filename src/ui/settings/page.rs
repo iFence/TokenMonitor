@@ -19,6 +19,7 @@ use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 use crate::app::app::RTokenApp;
 use crate::app::state::ScanInterval;
 use crate::app::update_check::UpdateState;
+use crate::core::model::ThemeColor;
 
 use crate::ui::page_shell;
 
@@ -56,17 +57,17 @@ fn settings(weak: &WeakEntity<RTokenApp>, panel_bg: Hsla) -> impl IntoElement {
         .pages([general_page(weak), about_page(weak)])
 }
 
-/// "通用": app-wide behavior settings (rescan interval).
+/// "通用": app-wide behavior settings (rescan interval, accent theme color).
 fn general_page(weak: &WeakEntity<RTokenApp>) -> SettingPage {
     let weak = weak.clone();
     SettingPage::new("通用")
         .icon(IconName::Settings)
         .description("应用整体行为设置")
         .group(
-            SettingGroup::new().title("通用").item(
-                SettingItem::new("扫描间隔", scan_interval_field(&weak))
-                    .description("自动重新扫描数据的间隔；应用启动时会立即扫描一次。"),
-            ),
+            SettingGroup::new()
+                .title("通用")
+                .item(SettingItem::new("扫描间隔", scan_interval_field(&weak)))
+                .item(SettingItem::new("主题色", theme_color_field(&weak))),
         )
 }
 
@@ -101,6 +102,37 @@ fn scan_interval_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedStrin
                     this.select_scan_interval(interval, cx);
                 });
             }
+        },
+    )
+}
+
+/// Dropdown field reading/writing the app accent [`ThemeColor`]. The option
+/// value is the color's persisted key; the label is its display name. Reads go
+/// through the captured `WeakEntity` so the field reflects the current color.
+fn theme_color_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedString> {
+    let options = ThemeColor::ALL
+        .map(|color| {
+            (
+                SharedString::from(color.key()),
+                SharedString::from(color.label()),
+            )
+        })
+        .to_vec();
+    let weak_read = weak.clone();
+    let weak_write = weak.clone();
+    SettingField::scrollable_dropdown(
+        options,
+        move |cx: &App| {
+            let color = weak_read
+                .read_with(cx, |app, _| app.theme_color)
+                .unwrap_or_default();
+            SharedString::from(color.key())
+        },
+        move |value: SharedString, cx: &mut App| {
+            let color = ThemeColor::from_key(&value);
+            let _ = weak_write.update(cx, |this, cx| {
+                this.select_theme_color(color, cx);
+            });
         },
     )
 }

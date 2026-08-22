@@ -2,10 +2,10 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, rgb, size, AnyElement, App, Context, ElementId, Hsla, InteractiveElement, IntoElement,
+    div, px, size, AnyElement, App, Context, ElementId, InteractiveElement, IntoElement,
     ParentElement, StatefulInteractiveElement, Styled, WeakEntity,
 };
-use gpui_component::{h_flex, v_flex, StyledExt};
+use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 
 use crate::app::app::RTokenApp;
 use crate::core::aggregation::SumStats;
@@ -119,7 +119,8 @@ pub fn provider_card(
 }
 
 /// Small donut ring showing cache-read share of (input + cache_read), with a
-/// side label, panel.png style. Zero-usage cards get a grey placeholder ring.
+/// side label, panel.png style. The hit arc uses the app's accent color;
+/// zero-usage cards get a grey placeholder ring.
 fn cache_hit_ring(
     cx: &Context<RTokenApp>,
     provider: Provider,
@@ -129,13 +130,13 @@ fn cache_hit_ring(
     let denom = stats.input_tokens + stats.cache_read_tokens;
 
     let (data, colors, pct_text) = if denom > 0 {
-        let hit_green: Hsla = rgb(0x4ade80).into();
+        let accent = cx.theme().primary;
         (
             vec![
                 ("hit".to_string(), stats.cache_read_tokens),
                 ("miss".to_string(), stats.input_tokens),
             ],
-            vec![hit_green, p.background],
+            vec![accent, p.background],
             format!(
                 "{:.0}%",
                 stats.cache_read_tokens as f64 * 100.0 / denom as f64

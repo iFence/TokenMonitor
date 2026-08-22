@@ -11,11 +11,11 @@ use gpui::{
 use gpui_component::calendar::Date;
 use gpui_component::date_picker::{DatePickerEvent, DatePickerState};
 use gpui_component::select::{SelectEvent, SelectState};
-use gpui_component::{v_flex, IndexPath};
+use gpui_component::{v_flex, Colorize, IndexPath};
 
 use crate::collector::{scheduler, Collector, CollectorEvent};
 use crate::core::aggregation::SumStats;
-use crate::core::model::{Provider, TimeWindow};
+use crate::core::model::{Provider, ThemeColor, TimeWindow};
 use crate::storage::default_db_path;
 use crate::storage::repository::UsageRepo;
 use crate::storage::sqlite;
@@ -51,6 +51,8 @@ pub struct RTokenApp {
     pub skipped_update_version: Option<String>,
     /// Periodic rescan interval (seconds), read live by the scheduler thread.
     pub scan_interval: Arc<AtomicU64>,
+    /// App accent theme color, applied to dashboard highlights and chart colors.
+    pub theme_color: ThemeColor,
     /// Wakes the scheduler thread when the interval changes so the new value
     /// takes effect immediately instead of after the old cycle elapses.
     scheduler_wake: std::sync::mpsc::Sender<()>,
@@ -71,6 +73,7 @@ impl RTokenApp {
 
         let check_updates_on_startup = collector.check_updates_on_startup();
         let skipped_update_version = collector.skipped_update_version();
+        let theme_color = collector.theme_color();
 
         // Stateful dropdown / date-picker entities live for the app's lifetime;
         // recreating them each render would reset open state on every notify.
@@ -115,6 +118,7 @@ impl RTokenApp {
             skipped_update_version,
             scan_interval,
             scheduler_wake,
+            theme_color,
         };
         app.sync_chart_app_select(window, cx);
 
@@ -215,6 +219,19 @@ impl RTokenApp {
         if changed {
             let _ = self.scheduler_wake.send(());
             self.trigger_scan(cx);
+        }
+        cx.notify();
+    }
+
+    /// Update the app accent theme color: persist it and re-render so the
+    /// dashboard highlights and charts pick up the new hue immediately.
+    pub fn select_theme_color(&mut self, color: ThemeColor, cx: &mut Context<Self>) {
+        if self.theme_color == color {
+            return;
+        }
+        self.theme_color = color;
+        if let Err(e) = self.collector.set_theme_color(color) {
+            self.state.last_error = Some(format!("save theme color: {e}"));
         }
         cx.notify();
     }
@@ -589,6 +606,26 @@ impl Render for RTokenApp {
             // near-black, so lift them to the card/main background.
             theme.tokens.tab_bar_segmented = ui::hsla_from_hex(0x262b33).into();
             theme.tokens.background = ui::hsla_from_hex(0x1b1e24).into();
+
+            // Apply the user's accent theme color to the primary/button/chart
+            // surfaces so the dashboard highlights, primary buttons, and chart
+            // series follow the selection.
+            let accent = ui::accent_color(self.theme_color);
+            let [c1, c2, c3, c4, c5] = ui::accent_palette(self.theme_color);
+            theme.primary = accent;
+            theme.primary_hover = accent.lighten(0.08);
+            theme.primary_active = accent.darken(0.08);
+            theme.button_primary = accent;
+            theme.button_primary_hover = accent.lighten(0.08);
+            theme.button_primary_active = accent.darken(0.08);
+            theme.ring = accent;
+            theme.blue = accent;
+            theme.blue_light = accent.lighten(0.2);
+            theme.chart_1 = c1;
+            theme.chart_2 = c2;
+            theme.chart_3 = c3;
+            theme.chart_4 = c4;
+            theme.chart_5 = c5;
         }
 
         let p = crate::ui::palette(cx);

@@ -11,7 +11,7 @@ use anyhow::Result;
 use async_channel::{unbounded, Receiver, Sender};
 use rusqlite::Connection;
 
-use crate::core::model::Provider;
+use crate::core::model::{Provider, ThemeColor};
 use crate::core::pricing::{Pricer, PRICING_VERSION, PRICING_VERSION_KEY};
 use crate::providers::{build_sources, default_configs, ProviderSource};
 use crate::storage::repository::{SettingsRepo, UsageRepo};
@@ -25,6 +25,9 @@ const SKIPPED_UPDATE_VERSION_KEY: &str = "update.skipped_version";
 
 /// Settings key holding the periodic rescan interval, in seconds.
 const SCAN_INTERVAL_KEY: &str = "scan.interval_seconds";
+
+/// Settings key holding the app accent theme color (a `ThemeColor` key).
+const THEME_COLOR_KEY: &str = "theme.color";
 
 /// Default periodic rescan interval (5 minutes).
 pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 300;
@@ -161,6 +164,22 @@ impl Collector {
     pub fn set_scan_interval_seconds(&self, secs: u64) -> Result<()> {
         let conn = self.db.lock().expect("db lock poisoned");
         SettingsRepo::new(&conn).set(SCAN_INTERVAL_KEY, &secs.to_string())
+    }
+
+    /// The app accent theme color (defaults to ocean blue).
+    pub fn theme_color(&self) -> ThemeColor {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn)
+            .get(THEME_COLOR_KEY)
+            .ok()
+            .flatten()
+            .map(|value| ThemeColor::from_key(&value))
+            .unwrap_or_default()
+    }
+
+    pub fn set_theme_color(&self, color: ThemeColor) -> Result<()> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn).set(THEME_COLOR_KEY, color.key())
     }
 
     /// The update version the user last chose to skip, if any.

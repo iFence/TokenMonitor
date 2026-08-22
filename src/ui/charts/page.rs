@@ -209,20 +209,7 @@ fn empty_hint(text: &str, color: Hsla) -> AnyElement {
 
 fn series_colors(cx: &Context<RTokenApp>) -> Vec<Hsla> {
     let t = cx.theme();
-    vec![
-        t.chart_1,
-        t.chart_2,
-        t.chart_3,
-        t.chart_4,
-        t.chart_5,
-        Hsla {
-            // GPUI stores hue normalized to 0..=1 (not degrees).
-            h: 200.0 / 360.0,
-            s: 0.6,
-            l: 0.55,
-            a: 1.0,
-        },
-    ]
+    vec![t.chart_1, t.chart_2, t.chart_3, t.chart_4, t.chart_5]
 }
 
 fn metric_value(metric: ChartMetric, s: SumStats) -> f64 {
