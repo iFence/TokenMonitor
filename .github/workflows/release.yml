@@ -38,6 +38,14 @@ jobs:
       - name: Build MSI installer
         run: cargo wix
 
+      - name: Build TUI binary
+        shell: pwsh
+        run: |
+          cargo build --release --no-default-features --features tui
+          if (-not (Test-Path "target/release/tokenmonitor-tui.exe")) {
+            throw "tokenmonitor-tui.exe is missing after the TUI build"
+          }
+
       # cargo-wix names the MSI from the Cargo package name ("tokenmonitor-*.msi");
       # rename it to match the portable zip's TokenMonitor branding. The MSI's
       # installed display name (Product Name / folder / start menu) already
@@ -60,6 +68,7 @@ jobs:
           $root = "target/TokenMonitor-portable-windows-x64"
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           Copy-Item "target/release/tokenmonitor-app.exe" "$root/"
+          Copy-Item "target/release/tokenmonitor-tui.exe" "$root/"
           Copy-Item "README.md" "$root/"
           Copy-Item "LICENSE" "$root/"
           # Marker the app checks at runtime to detect a portable (免安装) layout
@@ -76,4 +85,40 @@ jobs:
           files: |
             target/wix/*.msi
             target/TokenMonitor-*-windows-x64.zip
+          fail_on_unmatched_files: true
+
+  linux-release:
+    name: Linux TUI tarball
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build TUI binary
+        run: cargo build --release --no-default-features --features tui
+
+      - name: Package portable tarball
+        run: |
+          set -euo pipefail
+          version="${{ github.ref_name }}"
+          version="${version#v}"
+          root="target/TokenMonitor-portable-linux-x64"
+          mkdir -p "$root"
+          cp target/release/tokenmonitor-tui "$root/"
+          cp README.md "$root/"
+          cp LICENSE "$root/"
+          # Marker the binary checks at runtime to detect a portable (免安装) layout.
+          touch "$root/.portable"
+          if [ ! -f "$root/tokenmonitor-tui" ]; then
+            echo "tokenmonitor-tui is missing from the portable bundle" >&2
+            exit 1
+          fi
+          tar -czf "target/TokenMonitor-v${version}-linux-x64.tar.gz" -C "$root" .
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/TokenMonitor-*-linux-x64.tar.gz
           fail_on_unmatched_files: true
