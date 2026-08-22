@@ -7,6 +7,18 @@
 - 标题下方直接填写会展示在应用更新弹窗中的 Markdown 内容
 - 使用 `---` 或下一个版本标题结束当前版本说明
 
+## v0.3.1
+
+### ✨ 新增功能
+- **Linux 支持（TUI）**：终端版现可运行于 Linux，数据目录按 XDG 规范落到 `~/.local/share/tokenmonitor`，便携布局检测、文件管理器打开等平台能力已补齐。
+- **Linux TUI 发布包**：GitHub Release 新增 `linux-x64` tar.gz 便携包，`tokenmonitor-tui` 可直接解压使用。
+
+### 🚀 优化改进
+- **TUI 随 Windows 便携包发布**：Windows 便携 zip 同时包含桌面版与 TUI，一次下载双前端可用。
+- **TUI 在线更新可用**：TUI 打包进便携包后，更新检查（`--check-update` / 交互面板）可正确识别便携布局，下载对应平台的更新包。
+
+---
+
 ## v0.3.0
 
 ### ✨ 新增功能
