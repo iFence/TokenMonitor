@@ -25,11 +25,14 @@ fn level_color(level: usize) -> Color {
     }
 }
 
-/// One summary card: grey label + bold value.
-fn stat_card(label: &str, value: String) -> Vec<Span<'static>> {
+/// One summary card: grey label + bold colored value.
+fn stat_card(label: &str, value: String, color: Color) -> Vec<Span<'static>> {
     vec![
         Span::styled(format!("{label} "), Style::default().fg(Color::Gray)),
-        Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            value,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
     ]
 }
 
@@ -58,7 +61,7 @@ fn weekday_label(row: i64) -> Span<'static> {
 pub fn draw(frame: &mut Frame, app: &TuiApp) {
     let [header, stats_area, heatmap, breakdown, detail, hint] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(3),
+        Constraint::Length(1),
         // Month label + 7 weekday rows + legend.
         Constraint::Length(9),
         Constraint::Min(0),
@@ -90,25 +93,35 @@ pub fn draw(frame: &mut Frame, app: &TuiApp) {
     }
     frame.render_widget(Paragraph::new(Line::from(header_spans)), header);
 
-    // Summary cards.
-    let summary = Text::from(vec![
-        stats_line(vec![
-            stat_card(
-                "总Token",
-                format_tokens_compact_f64(stats.total.total_tokens() as f64),
-            ),
-            stat_card(
-                "总花费",
-                format_cost_f64(stats.total.cost_micros as f64 / 1e6),
-            ),
-            stat_card("活跃天数", format!("{} 天", stats.active_days)),
-        ]),
-        stats_line(vec![
-            stat_card("最长连续", format!("{} 天", stats.longest_streak)),
-            stat_card("当前连续", format!("{} 天", stats.current_streak)),
-            stat_card("最忙一天", busiest_label(&stats)),
-        ]),
-    ]);
+    // Summary cards (all on one line), with colored values.
+    let summary = Text::from(vec![stats_line(vec![
+        stat_card(
+            "总Token",
+            format_tokens_compact_f64(stats.total.total_tokens() as f64),
+            Color::Cyan,
+        ),
+        stat_card(
+            "总花费",
+            format_cost_f64(stats.total.cost_micros as f64 / 1e6),
+            Color::Yellow,
+        ),
+        stat_card(
+            "活跃天数",
+            format!("{} 天", stats.active_days),
+            Color::Green,
+        ),
+        stat_card(
+            "最长连续",
+            format!("{} 天", stats.longest_streak),
+            Color::Magenta,
+        ),
+        stat_card(
+            "当前连续",
+            format!("{} 天", stats.current_streak),
+            Color::Magenta,
+        ),
+        stat_card("最忙一天", busiest_label(&stats), Color::Blue),
+    ])]);
     frame.render_widget(Paragraph::new(summary), stats_area);
 
     // Heatmap. The grid doubles its cells when it fits the heatmap width, so
@@ -264,7 +277,7 @@ fn breakdown_block(title: &str, range: &str) -> Block<'static> {
     ))
 }
 
-/// Per-provider ("Agent") totals for the selected range: rank + name + totals.
+/// Per-provider ("Agent") totals for the selected range.
 fn agent_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     let entries = app
         .by_provider()
@@ -274,14 +287,16 @@ fn agent_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     breakdown_rows(&entries, width)
 }
 
-/// Per-model totals for the selected range, cost-descending.
+/// Per-model totals for the selected range, token-descending.
 fn model_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     breakdown_rows(app.by_model(), width)
 }
 
-/// Ranked `(name, stats)` rows with a rank badge, the name in white, and the
-/// token/cost figures right-aligned to the column's inner width (borders take
-/// two columns).
+/// Three columns per row — name, tokens, cost — each right-padded/left-padded
+/// to its own display-width column so the figures line up vertically. Tokens
+/// and cost are separate columns, so a short token count never pushes the
+/// price out of alignment (the `\t` the user suggested would not help: ratatui
+/// renders tabs as zero-width, so explicit column padding is used instead).
 fn breakdown_rows(entries: &[(String, SumStats)], width: usize) -> Vec<Line<'static>> {
     if entries.is_empty() {
         return vec![Line::from(vec![Span::styled(
@@ -290,52 +305,86 @@ fn breakdown_rows(entries: &[(String, SumStats)], width: usize) -> Vec<Line<'sta
         )])];
     }
 
+    let token_strs: Vec<String> = entries
+        .iter()
+        .map(|(_, s)| format_tokens_compact_f64(s.total_tokens() as f64))
+        .collect();
+    let cost_strs: Vec<String> = entries
+        .iter()
+        .map(|(_, s)| format_cost_f64(s.cost_micros as f64 / 1e6))
+        .collect();
+    let token_w = token_strs
+        .iter()
+        .map(|s| display_width(s))
+        .max()
+        .unwrap_or(1)
+        .min(8);
+    let cost_w = cost_strs
+        .iter()
+        .map(|s| display_width(s))
+        .max()
+        .unwrap_or(1)
+        .min(10);
+
     let inner = width.saturating_sub(2);
+    let sep_w = 2;
+    let name_w = inner.saturating_sub(token_w + cost_w + sep_w * 2);
+
     let mut lines = Vec::new();
-    for (i, (name, stats)) in entries.iter().take(BREAKDOWN_ROWS).enumerate() {
-        let rank_style = if i == 0 {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let stat = format!(
-            "{}  {}",
-            format_tokens_compact_f64(stats.total_tokens() as f64),
-            format_cost_f64(stats.cost_micros as f64 / 1e6)
-        );
-        let prefix_w = 3; // rank (2) + separator space
-        let stat_w = stat.chars().count();
-        let name_max = inner.saturating_sub(prefix_w + stat_w);
-        let name = truncate(name, name_max);
-        let pad = inner.saturating_sub(prefix_w + name.chars().count() + stat_w);
+    for (((name, _), token), cost) in entries
+        .iter()
+        .zip(&token_strs)
+        .zip(&cost_strs)
+        .take(BREAKDOWN_ROWS)
+    {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:>2}", i + 1), rank_style),
-            Span::raw(" "),
-            Span::styled(name, Style::default().fg(Color::White)),
-            Span::raw(" ".repeat(pad)),
-            Span::styled(stat, Style::default().fg(Color::Gray)),
+            Span::styled(
+                pad_right(&truncate(name, name_w), name_w),
+                Style::default().fg(Color::White),
+            ),
+            Span::raw("  "),
+            Span::styled(pad_left(token, token_w), Style::default().fg(Color::Gray)),
+            Span::raw("  "),
+            Span::styled(pad_left(cost, cost_w), Style::default().fg(Color::Yellow)),
         ]));
     }
     lines
 }
 
-/// Truncate `s` to at most `max` display chars, appending an ellipsis when cut.
+/// Display width of `s` in terminal columns (non-ASCII counts as 2).
+fn display_width(s: &str) -> usize {
+    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
+/// Left-pad `s` to `width` display columns.
+fn pad_left(s: &str, width: usize) -> String {
+    let pad = width.saturating_sub(display_width(s));
+    format!("{}{s}", " ".repeat(pad))
+}
+
+/// Right-pad `s` to `width` display columns.
+fn pad_right(s: &str, width: usize) -> String {
+    let pad = width.saturating_sub(display_width(s));
+    format!("{s}{}", " ".repeat(pad))
+}
+
+/// Truncate `s` to at most `max` display columns, appending an ellipsis when
+/// cut.
 fn truncate(s: &str, max: usize) -> String {
-    let len = s.chars().count();
-    if len <= max {
-        return s.to_string();
-    }
-    match max {
-        0 => String::new(),
-        1 => "…".to_string(),
-        _ => {
-            let mut out: String = s.chars().take(max - 1).collect();
-            out.push('…');
-            out
+    let mut out = String::new();
+    let mut used = 0usize;
+    for c in s.chars() {
+        let w = if c.is_ascii() { 1 } else { 2 };
+        if used + w >= max {
+            break;
         }
+        out.push(c);
+        used += w;
     }
+    if used < display_width(s) {
+        out.push('…');
+    }
+    out
 }
 
 fn weekday_name(wd: Weekday) -> &'static str {

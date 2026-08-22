@@ -30,16 +30,19 @@ pub fn load_report_days(
     Ok(days)
 }
 
-/// Per-provider ("agent") aggregates over `window`, sorted by cost descending.
+/// Per-provider ("agent") aggregates over `window`, sorted by token usage
+/// descending.
 pub fn load_report_by_provider(
     conn: &Connection,
     window: &TimeWindow,
 ) -> Result<Vec<(Provider, SumStats)>> {
-    UsageRepo::new(conn).aggregate_by_provider(window)
+    let mut v = UsageRepo::new(conn).aggregate_by_provider(window)?;
+    v.sort_by(|a, b| b.1.total_tokens().cmp(&a.1.total_tokens()));
+    Ok(v)
 }
 
-/// Per-model aggregates across all providers over `window`, sorted by cost
-/// descending.
+/// Per-model aggregates across all providers over `window`, sorted by token
+/// usage descending.
 pub fn load_report_by_model(
     conn: &Connection,
     window: &TimeWindow,
@@ -52,6 +55,6 @@ pub fn load_report_by_model(
         }
     }
     let mut v: Vec<(String, SumStats)> = by_model.into_iter().collect();
-    v.sort_by(|a, b| b.1.cost_micros.cmp(&a.1.cost_micros));
+    v.sort_by(|a, b| b.1.total_tokens().cmp(&a.1.total_tokens()));
     Ok(v)
 }
