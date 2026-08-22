@@ -18,8 +18,8 @@ use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 
 use crate::app::app::TokenMonitorApp;
 use crate::app::state::ScanInterval;
-use crate::app::update_check::UpdateState;
 use crate::core::model::ThemeColor;
+use crate::core::update::UpdateState;
 
 use crate::ui::page_shell;
 

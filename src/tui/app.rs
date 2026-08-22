@@ -7,12 +7,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{Datelike, Duration, NaiveDate, Utc};
+use semver::Version;
 
 use crate::collector::{Collector, CollectorEvent};
 use crate::core::aggregation::SumStats;
 use crate::core::model::{Period, Provider, TimeWindow};
 use crate::core::time::east8_local;
+use crate::core::update::UpdateState;
 use crate::report::heatmap::{grid_start, week_count, ROWS};
+use crate::tui::update::{self, UpdateEvent};
 
 /// Result of handling one key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,15 +87,17 @@ pub enum TuiView {
     #[default]
     Overview,
     TodayHourly,
+    Updates,
 }
 
 impl TuiView {
-    pub const ALL: [TuiView; 2] = [Self::Overview, Self::TodayHourly];
+    pub const ALL: [TuiView; 3] = [Self::Overview, Self::TodayHourly, Self::Updates];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Overview => "总览",
             Self::TodayHourly => "当日分时",
+            Self::Updates => "更新检查",
         }
     }
 
@@ -134,11 +139,25 @@ pub struct TuiApp {
     pub status: String,
     /// Short summary of the last completed scan.
     pub last_scan: Option<String>,
+    /// Auto-update state (check / download result machine).
+    update: UpdateState,
+    /// Update results are delivered over this channel from background threads.
+    update_rx: async_channel::Receiver<UpdateEvent>,
+    update_tx: async_channel::Sender<UpdateEvent>,
+    /// Where the current update asset was / will be saved.
+    update_dest: Option<PathBuf>,
+    /// Version the user chose to skip, read from settings at startup.
+    skipped_update_version: Option<String>,
+    /// Whether to check for updates on startup (defaults to `true`).
+    check_updates_on_startup: bool,
 }
 
 impl TuiApp {
     pub fn new(collector: Arc<Collector>) -> Self {
         let db_path = collector.db_path().to_path_buf();
+        let skipped_update_version = collector.skipped_update_version();
+        let check_updates_on_startup = collector.check_updates_on_startup();
+        let (update_tx, update_rx) = async_channel::unbounded();
         let mut app = TuiApp {
             db_path,
             collector,
@@ -155,6 +174,12 @@ impl TuiApp {
             view: TuiView::default(),
             status: "等待扫描…".to_string(),
             last_scan: None,
+            update: UpdateState::default(),
+            update_rx,
+            update_tx,
+            update_dest: None,
+            skipped_update_version,
+            check_updates_on_startup,
         };
         let _ = app.reload();
         // Start the cursor on the most recent day (today) instead of the
@@ -259,6 +284,144 @@ impl TuiApp {
         self.view = self.view.step(dir);
     }
 
+    /// The auto-update state machine.
+    pub fn update_state(&self) -> &UpdateState {
+        &self.update
+    }
+
+    /// Where the last update download landed (if any).
+    pub fn update_dest(&self) -> Option<&std::path::Path> {
+        self.update_dest.as_deref()
+    }
+
+    /// Whether to run a silent update check on startup.
+    pub fn check_updates_on_startup(&self) -> bool {
+        self.check_updates_on_startup
+    }
+
+    /// Start a check on a background thread. `manual` controls whether a
+    /// failure is surfaced (`Error`) or swallowed (`Idle`).
+    pub fn check_updates(&mut self, manual: bool) -> Result<()> {
+        if self.update.is_busy() {
+            return Ok(());
+        }
+        self.update = UpdateState::Checking;
+        let current =
+            Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver");
+        let portable = crate::platform::is_portable();
+        let tx = self.update_tx.clone();
+        std::thread::Builder::new()
+            .name("tokenmonitor-update-check".into())
+            .spawn(move || {
+                let result = update::check_update(&current, portable);
+                let _ = tx.send_blocking(UpdateEvent::Checked { manual, result });
+            })?;
+        Ok(())
+    }
+
+    /// Download the available asset next to the running exe (blocking on a
+    /// background thread).
+    pub fn download_update(&mut self) -> Result<()> {
+        let (version, asset) = match &self.update {
+            UpdateState::Available {
+                latest_version,
+                asset,
+                ..
+            } => (latest_version.clone(), asset.clone()),
+            _ => return Ok(()),
+        };
+        self.update = UpdateState::Downloading {
+            latest_version: version.clone(),
+            downloaded_bytes: 0,
+            total_bytes: (asset.size > 0).then_some(asset.size),
+        };
+        let dest = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+            .unwrap_or_else(std::env::temp_dir)
+            .join(&asset.name);
+        self.update_dest = Some(dest.clone());
+        let tx = self.update_tx.clone();
+        std::thread::Builder::new()
+            .name("tokenmonitor-update-download".into())
+            .spawn(move || {
+                let result = update::download(&asset.url, &dest, asset.size).map(|()| dest);
+                let _ = tx.send_blocking(UpdateEvent::Downloaded { version, result });
+            })?;
+        Ok(())
+    }
+
+    /// Dismiss the available update and remember the version in settings.
+    pub fn skip_update(&mut self) -> Result<()> {
+        if let UpdateState::Available { latest_version, .. } = &self.update {
+            let version = latest_version.to_string();
+            self.skipped_update_version = Some(version.clone());
+            self.collector.set_skipped_update_version(Some(&version))?;
+        }
+        self.update = UpdateState::Idle;
+        Ok(())
+    }
+
+    /// Poll the update-result channel without blocking.
+    pub fn try_recv_update_event(&self) -> Option<UpdateEvent> {
+        self.update_rx.try_recv().ok()
+    }
+
+    /// Apply an update check / download result.
+    pub fn handle_update_event(&mut self, event: UpdateEvent) {
+        match event {
+            UpdateEvent::Checked { manual, result } => {
+                self.update = match result {
+                    Ok(Some(info)) => {
+                        let skipped = self
+                            .skipped_update_version
+                            .as_deref()
+                            .map(|v| v.trim_start_matches('v'))
+                            .and_then(|v| Version::parse(v).ok());
+                        if skipped.as_ref() == Some(&info.latest_version) {
+                            if manual {
+                                UpdateState::UpToDate
+                            } else {
+                                UpdateState::Idle
+                            }
+                        } else {
+                            UpdateState::Available {
+                                latest_version: info.latest_version,
+                                release_notes: info.release_notes,
+                                asset: info.asset,
+                            }
+                        }
+                    }
+                    Ok(None) => UpdateState::UpToDate,
+                    Err(err) => {
+                        if manual {
+                            UpdateState::Error(format!("{err:#}"))
+                        } else {
+                            UpdateState::Idle
+                        }
+                    }
+                };
+            }
+            UpdateEvent::Downloaded { version, result } => {
+                self.update = match result {
+                    Ok(_) => {
+                        let file_name = self
+                            .update_dest
+                            .as_ref()
+                            .and_then(|p| p.file_name())
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        UpdateState::Downloaded {
+                            latest_version: version,
+                            file_name,
+                        }
+                    }
+                    Err(err) => UpdateState::Error(format!("{err:#}")),
+                };
+            }
+        }
+    }
+
     /// Apply a collector event, re-loading the report when a scan changed data.
     pub fn handle_collector_event(&mut self, event: CollectorEvent) -> Result<()> {
         match event {
@@ -305,6 +468,14 @@ impl TuiApp {
             // `Tab` / `Shift+Tab` cycle the full-screen panel.
             KeyCode::Tab => self.cycle_view(1),
             KeyCode::BackTab => self.cycle_view(-1),
+            // `u` opens the updates panel and starts a manual check.
+            KeyCode::Char('u') if key.modifiers == KeyModifiers::NONE => {
+                self.view = TuiView::Updates;
+                self.check_updates(true)?;
+            }
+            // With an update available: `d` downloads, `s` skips it.
+            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => self.download_update()?,
+            KeyCode::Char('s') if key.modifiers == KeyModifiers::NONE => self.skip_update()?,
             KeyCode::Left => self.move_selection(-1, 0),
             KeyCode::Right => self.move_selection(1, 0),
             KeyCode::Up => self.move_selection(0, -1),

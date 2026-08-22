@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 use crate::core::aggregation::SumStats;
+use crate::core::update::UpdateState;
 use crate::format::{format_cost_f64, format_tokens_compact_f64};
 use crate::report::heatmap::{level_for, month_labels, ROWS};
 use crate::report::{report_stats, ReportStats};
@@ -62,6 +63,7 @@ pub fn draw(frame: &mut Frame, app: &TuiApp) {
     match app.view() {
         TuiView::Overview => draw_overview(frame, app),
         TuiView::TodayHourly => draw_hourly(frame, app),
+        TuiView::Updates => draw_updates(frame, app),
     }
 }
 
@@ -105,6 +107,14 @@ fn draw_overview(frame: &mut Frame, app: &TuiApp) {
         header_spans.push(Span::styled(
             format!("  |  上次：{last}"),
             Style::default().fg(Color::DarkGray),
+        ));
+    }
+    if let UpdateState::Available { latest_version, .. } = app.update_state() {
+        header_spans.push(Span::styled(
+            format!("  |  ⬆ 新版本 v{latest_version} 可用"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(header_spans)), header);
@@ -172,12 +182,12 @@ fn draw_overview(frame: &mut Frame, app: &TuiApp) {
     frame.render_widget(Paragraph::new(detail_line(app)), detail);
 
     // Key hints.
-    frame.render_widget(Paragraph::new(hint_line()), hint);
+    frame.render_widget(Paragraph::new(hint_line(app)), hint);
 }
 
 /// The hint bar shared by all panels.
-fn hint_line() -> Line<'static> {
-    Line::from(vec![
+fn hint_line(app: &TuiApp) -> Line<'static> {
+    let mut spans = vec![
         Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled(" 退出", Style::default().fg(Color::Gray)),
         Span::raw("  |  "),
@@ -190,12 +200,27 @@ fn hint_line() -> Line<'static> {
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled(" 切换面板", Style::default().fg(Color::Gray)),
         Span::raw("  |  "),
+        Span::styled("u", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" 更新检查", Style::default().fg(Color::Gray)),
+        Span::raw("  |  "),
         Span::styled(
             "←→↑↓ / hjkl / Home / End",
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::styled(" 移动选中", Style::default().fg(Color::Gray)),
-    ])
+    ];
+    if app.update_state().has_update() {
+        spans.extend([
+            Span::raw("  |  "),
+            Span::styled(
+                "d 下载 · s 跳过",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+    }
+    Line::from(spans)
 }
 
 fn busiest_label(stats: &ReportStats) -> String {
@@ -408,7 +433,155 @@ fn draw_hourly(frame: &mut Frame, app: &TuiApp) {
         ),
         panel,
     );
-    frame.render_widget(Paragraph::new(hint_line()), hint);
+    frame.render_widget(Paragraph::new(hint_line(app)), hint);
+}
+
+/// Full-screen "update check" panel: current version, available update with
+/// release notes, download / skip actions, or the last check result.
+fn draw_updates(frame: &mut Frame, app: &TuiApp) {
+    let [panel, hint] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+
+    let inner_w = panel.width.saturating_sub(2) as usize;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let push = |lines: &mut Vec<Line<'static>>, text: String, color: Color| {
+        lines.extend(
+            wrap_text(&text, inner_w)
+                .into_iter()
+                .map(|t| Line::from(vec![Span::styled(t, Style::default().fg(color))])),
+        );
+    };
+
+    lines.push(Line::from(vec![Span::styled(
+        format!(" 当前版本 v{} ", env!("CARGO_PKG_VERSION")),
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![]));
+
+    match app.update_state() {
+        UpdateState::Idle => {
+            push(
+                &mut lines,
+                "尚未检查更新。按 u 立即检查。".into(),
+                Color::Gray,
+            );
+        }
+        UpdateState::Checking => {
+            push(&mut lines, "正在检查更新…".into(), Color::Cyan);
+        }
+        UpdateState::UpToDate => {
+            push(
+                &mut lines,
+                format!("当前已是最新版本 v{}。", env!("CARGO_PKG_VERSION")),
+                Color::Green,
+            );
+        }
+        UpdateState::Error(err) => {
+            push(&mut lines, format!("检查更新失败：{err}"), Color::Red);
+            push(&mut lines, "按 u 重试。".into(), Color::Gray);
+        }
+        UpdateState::Available {
+            latest_version,
+            release_notes,
+            asset,
+        } => {
+            push(
+                &mut lines,
+                format!(
+                    "发现新版本 v{latest_version}（当前 v{}）",
+                    env!("CARGO_PKG_VERSION")
+                ),
+                Color::Yellow,
+            );
+            push(
+                &mut lines,
+                format!("更新包：{}（{}）", asset.name, format_bytes(asset.size)),
+                Color::Cyan,
+            );
+            lines.push(Line::from(vec![]));
+            lines.push(Line::from(vec![Span::styled(
+                "更新说明".to_string(),
+                Style::default().fg(Color::DarkGray),
+            )]));
+            push(&mut lines, release_notes.clone(), Color::Gray);
+            lines.push(Line::from(vec![]));
+            lines.push(Line::from(vec![Span::styled(
+                "按 d 下载 · s 跳过",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+        }
+        UpdateState::Downloading { .. } => {
+            push(&mut lines, "正在下载更新包…".into(), Color::Cyan);
+        }
+        UpdateState::Installing => {
+            push(&mut lines, "正在安装…".into(), Color::Cyan);
+        }
+        UpdateState::Downloaded {
+            latest_version,
+            file_name,
+        } => {
+            push(
+                &mut lines,
+                format!("已下载 v{latest_version} 的更新包 {file_name}"),
+                Color::Green,
+            );
+            if let Some(dest) = app.update_dest() {
+                push(
+                    &mut lines,
+                    format!("保存位置：{}", dest.display()),
+                    Color::Gray,
+                );
+            }
+            push(
+                &mut lines,
+                "请解压覆盖（免安装版）或运行安装程序后重启。".into(),
+                Color::Gray,
+            );
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).block(Block::bordered().title(Span::styled(
+            " 更新检查 ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ))),
+        panel,
+    );
+    frame.render_widget(Paragraph::new(hint_line(app)), hint);
+}
+
+/// Human-readable byte count for the update asset.
+fn format_bytes(size: u64) -> String {
+    if size >= 1 << 20 {
+        format!("{:.1} MB", size as f64 / (1 << 20) as f64)
+    } else if size >= 1 << 10 {
+        format!("{:.1} KB", size as f64 / (1 << 10) as f64)
+    } else {
+        format!("{size} B")
+    }
+}
+
+/// Wrap `text` to `width` display columns, preserving blank lines.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(4);
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let mut line = String::new();
+        let mut used = 0usize;
+        for c in raw.chars() {
+            let w = if c.is_ascii() { 1 } else { 2 };
+            if used + w > width && !line.is_empty() {
+                out.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            line.push(c);
+            used += w;
+        }
+        out.push(line);
+    }
+    out
 }
 
 /// The 24 hours laid out as two side-by-side columns of 12 rows each.

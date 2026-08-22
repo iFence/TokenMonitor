@@ -42,10 +42,9 @@ ui = [
     "dep:gpui-component-assets",
     "dep:http_client",
     "dep:reqwest_client",
-    "dep:semver",
     "dep:futures",
 ]
-tui = ["dep:ratatui"]
+tui = ["dep:ratatui", "dep:ureq"]
 
 [dependencies]
 anyhow = "1.0"
@@ -62,13 +61,16 @@ async-channel = "2.5"
 # allocator's high-water mark after scans / view refreshes.
 mimalloc = "0.1"
 # Update check: version comparison + async HTTP for the GitHub releases API.
-# `ui`-only: the TUI frontend does not check for updates.
-semver = { version = "1", optional = true }
+# `semver` is shared by both frontends; the HTTP clients are per-frontend
+# (`http_client` for the GPUI app, `ureq` for the TUI).
+semver = "1"
 futures = { version = "0.3", optional = true }
 # DeepSeek harness writes `~/.dsh/sessions/**/*.jsonl.zstd`; streaming decoder.
 zstd = "0.13"
 # Headless terminal frontend (server / no-display machines).
 ratatui = { version = "0.29", optional = true }
+# TUI update check: blocking HTTPS GET + download on a background thread.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
 
 # GPUI 栈 —— 不固定 rev 的 git 依赖；版本只通过 Cargo.lock 锁定。
 # 切勿加 rev=（git+url 与 git+url?rev= 是两个 source，会解析出两个不兼容的 gpui）。

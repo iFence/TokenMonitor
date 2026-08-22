@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod ui;
+pub mod update;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc;
@@ -31,6 +32,9 @@ pub fn run() -> Result<()> {
 
     let mut app = TuiApp::new(collector.clone());
     collector.scan_async()?;
+    if app.check_updates_on_startup() {
+        let _ = app.check_updates(false);
+    }
 
     let mut terminal = ratatui::try_init()?;
     let result = event_loop(&mut terminal, &mut app, &events);
@@ -51,6 +55,10 @@ fn event_loop(
         // user is idle.
         while let Ok(event) = events.try_recv() {
             app.handle_collector_event(event)?;
+        }
+        // Apply any finished update check / download.
+        while let Some(event) = app.try_recv_update_event() {
+            app.handle_update_event(event);
         }
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
