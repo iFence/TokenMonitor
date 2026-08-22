@@ -53,7 +53,7 @@ struct PathData {
 struct Tokens {
     input: Option<i64>,
     output: Option<i64>,
-    /// OpenCode reports reasoning tokens separately from input; rToken has no
+    /// OpenCode reports reasoning tokens separately from input; TokenMonitor has no
     /// reasoning bucket, so they are folded into input (the Anthropic
     /// convention) to keep `total_tokens()` aligned with OpenCode's own totals.
     reasoning: Option<i64>,
@@ -108,9 +108,9 @@ impl OpenCodeSource {
     }
 
     /// Open the store without writing to it. Prefers a genuinely read-only
-    /// connection so rToken never contends with OpenCode's live database; when
+    /// connection so TokenMonitor never contends with OpenCode's live database; when
     /// that fails (e.g. a WAL file whose `-shm` is missing, which read-only
-    /// SQLite refuses), falls back to a `query_only` connection like rToken's
+    /// SQLite refuses), falls back to a `query_only` connection like TokenMonitor's
     /// own read path.
     fn open_db(path: &Path) -> Result<Connection, String> {
         let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {

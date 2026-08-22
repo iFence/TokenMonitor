@@ -18,7 +18,7 @@ pub use source::{FileStates, ProviderConfig, ProviderError, ProviderSource, Scan
 
 use crate::core::model::Provider;
 
-/// All providers rToken can track, in display order.
+/// All providers TokenMonitor can track, in display order.
 pub fn all_providers() -> [Provider; 11] {
     Provider::ALL
 }

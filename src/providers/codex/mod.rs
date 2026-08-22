@@ -194,7 +194,7 @@ impl CodexSource {
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
                 // Codex's `input_tokens` includes the cached portion; keep
-                // rToken's buckets disjoint so `total_tokens()` stays accurate.
+                // TokenMonitor's buckets disjoint so `total_tokens()` stays accurate.
                 let fresh_input = input_tokens.saturating_sub(cached_tokens);
                 if fresh_input + cached_tokens + cache_write_tokens + output_tokens == 0 {
                     return None;
@@ -296,7 +296,7 @@ mod tests {
     fn write_session_file(dir: &Path) -> PathBuf {
         let path =
             dir.join("rollout-2026-08-07T18-35-19-019fdbca-a8c9-7132-853b-77eb29823eeb.jsonl");
-        let body = r#"{"timestamp":"2026-08-07T10:35:00.000Z","type":"session_meta","payload":{"id":"019fdbca-a8c9-7132-853b-77eb29823eeb","cwd":"C:\\Users\\yulei\\RustProjects\\rToken"}}
+        let body = r#"{"timestamp":"2026-08-07T10:35:00.000Z","type":"session_meta","payload":{"id":"019fdbca-a8c9-7132-853b-77eb29823eeb","cwd":"C:\\Users\\yulei\\RustProjects\\TokenMonitor"}}
 {"timestamp":"2026-08-07T10:35:01.000Z","type":"turn_context","payload":{"turn_id":"t1","model":"gpt-5.6-sol"}}
 {"timestamp":"2026-08-07T10:38:36.844Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":23823,"cached_input_tokens":11008,"cache_write_input_tokens":0,"output_tokens":500,"total_tokens":24323}}}}
 {"timestamp":"2026-08-07T10:38:54.610Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":34478,"cached_input_tokens":23296,"cache_write_input_tokens":0,"output_tokens":701,"total_tokens":35179}}}}
@@ -334,14 +334,14 @@ mod tests {
         // First request: input incl. cache minus cached, cache kept separate.
         let first = &records[0];
         assert_eq!(first.provider, Provider::Codex);
-        assert_eq!(first.project, "rToken");
+        assert_eq!(first.project, "TokenMonitor");
         assert_eq!(first.session_id, "019fdbca-a8c9-7132-853b-77eb29823eeb");
         assert_eq!(first.usage.model, "gpt-5.6-sol");
         assert_eq!(first.usage.input_tokens, 23823 - 11008);
         assert_eq!(first.usage.cache_read_tokens, 11008);
         assert_eq!(first.usage.cache_write_tokens, 0);
         assert_eq!(first.usage.output_tokens, 500);
-        // rToken total stays consistent with Codex's reported total.
+        // TokenMonitor total stays consistent with Codex's reported total.
         assert_eq!(first.usage.total_tokens(), 24323);
         // Dedup key is the relative path + line index, like Claude.
         assert!(first.fingerprint.ends_with(":2"));

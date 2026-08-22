@@ -22,12 +22,21 @@ unsafe extern "system" {
     fn GetWindowThreadProcessId(hwnd: isize, lpdw_process_id: *mut u32) -> u32;
 }
 
-/// rToken's own data directory (`%APPDATA%\rToken`).
+/// TokenMonitor's own data directory (`%APPDATA%\TokenMonitor`).
 pub fn app_data_dir() -> Result<PathBuf> {
     let dir = dirs::data_dir()
-        .map(|p| p.join("rToken"))
+        .map(|p| p.join("TokenMonitor"))
         .context("resolve OS data directory")?;
     Ok(dir)
+}
+
+/// Legacy `rToken` data directory (`%APPDATA%\rToken`) from before the rename.
+/// Consulted only for the one-time database migration in
+/// `storage::migrate_legacy_db`.
+pub fn legacy_data_dir() -> Result<PathBuf> {
+    dirs::data_dir()
+        .map(|p| p.join("rToken"))
+        .context("resolve OS data directory")
 }
 
 pub fn home_dir() -> Result<PathBuf> {
@@ -67,7 +76,7 @@ pub fn launch_installer(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Force the native titlebar into dark mode so it matches rToken's dark panels
+/// Force the native titlebar into dark mode so it matches TokenMonitor's dark panels
 /// regardless of the OS theme. GPUI sizes the titlebar by the system
 /// appearance; this overrides it with `DWMWA_USE_IMMERSIVE_DARK_MODE`.
 pub fn apply_dark_titlebar() {

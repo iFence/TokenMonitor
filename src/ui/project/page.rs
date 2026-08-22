@@ -2,15 +2,15 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{div, px, AnyElement, Context, IntoElement, ParentElement, Styled, Window};
 use gpui_component::{h_flex, v_flex};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 
 use crate::ui::format::format_tokens_compact;
 use crate::ui::page_shell;
 
 pub fn render_page(
-    app: &mut RTokenApp,
+    app: &mut TokenMonitorApp,
     _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
     let rows = &app.state.by_project;

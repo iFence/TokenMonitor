@@ -132,7 +132,7 @@ impl CodebuddySource {
             .as_ref()
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        // CodeBuddy's `input_tokens` includes the cached portion; keep rToken's
+        // CodeBuddy's `input_tokens` includes the cached portion; keep TokenMonitor's
         // buckets disjoint so `total_tokens()` stays accurate.
         let fresh_input = input_tokens.saturating_sub(cache_read_tokens);
         if fresh_input + cache_read_tokens + output_tokens == 0 {

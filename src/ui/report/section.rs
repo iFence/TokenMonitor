@@ -11,15 +11,16 @@ use gpui::{
 use gpui_component::{h_flex, v_flex, StyledExt};
 
 use super::heatmap::{legend, ContributionHeatmap, HoverCallback, ResizeCallback};
-use super::stats::{report_stats, ReportStats};
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::ReportHover;
 use crate::core::aggregation::SumStats;
 use crate::core::time::east8_local;
 use crate::ui::format::{format_cost_f64, format_tokens_compact_f64};
 
+use super::stats::{report_stats, ReportStats};
+
 /// The report content: summary cards on top, 365-day heatmap below.
-pub fn report_section(app: &RTokenApp, cx: &Context<RTokenApp>) -> AnyElement {
+pub fn report_section(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> AnyElement {
     let p = crate::ui::palette(cx);
     let data = app.state.report.data.clone();
 
@@ -51,7 +52,7 @@ pub fn report_section(app: &RTokenApp, cx: &Context<RTokenApp>) -> AnyElement {
 
 /// Wire heatmap hover events into the app-level tooltip state so the view
 /// re-renders with the floating tooltip pinned to the hovered cell.
-fn hover_callback(cx: &Context<RTokenApp>) -> Rc<HoverCallback> {
+fn hover_callback(cx: &Context<TokenMonitorApp>) -> Rc<HoverCallback> {
     let weak = cx.weak_entity();
     Rc::new(move |is_hovered, bounds, date, stats, _window, cx| {
         let _ = weak.update(cx, |app, cx| {
@@ -81,7 +82,7 @@ fn hover_callback(cx: &Context<RTokenApp>) -> Rc<HoverCallback> {
 /// until some input forced a redraw. Deferring the notify to the next frame
 /// via [`Window::on_next_frame`] guarantees the grid always re-renders at the
 /// freshly measured size.
-fn resize_callback(cx: &Context<RTokenApp>) -> Rc<ResizeCallback> {
+fn resize_callback(cx: &Context<TokenMonitorApp>) -> Rc<ResizeCallback> {
     let weak = cx.weak_entity();
     Rc::new(move |bounds, window, cx| {
         let weak = weak.clone();
@@ -102,7 +103,7 @@ fn resize_callback(cx: &Context<RTokenApp>) -> Rc<ResizeCallback> {
 }
 
 /// Six summary cards: totals, activity, streaks, and the busiest day.
-fn summary_panel(stats: &ReportStats, cx: &Context<RTokenApp>) -> impl IntoElement {
+fn summary_panel(stats: &ReportStats, cx: &Context<TokenMonitorApp>) -> impl IntoElement {
     let cards = [
         (
             "总 Token",
@@ -124,7 +125,7 @@ fn summary_panel(stats: &ReportStats, cx: &Context<RTokenApp>) -> impl IntoEleme
     )
 }
 
-fn stat_card(cx: &Context<RTokenApp>, label: &str, value: String) -> impl IntoElement {
+fn stat_card(cx: &Context<TokenMonitorApp>, label: &str, value: String) -> impl IntoElement {
     let p = crate::ui::palette(cx);
     v_flex()
         .flex_1()
@@ -167,7 +168,7 @@ fn heatmap_card(
     hover: Option<ReportHover>,
     on_hover: &Rc<HoverCallback>,
     on_resize: &Rc<ResizeCallback>,
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
 ) -> impl IntoElement {
     let p = crate::ui::palette(cx);
 

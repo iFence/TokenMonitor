@@ -82,7 +82,7 @@
             Schedule='afterInstallInitialize'
             DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
 
-        <Icon Id='rtokenICO' SourceFile='resources\rtoken.ico'/>
+        <Icon Id='tokenmonitorICO' SourceFile='resources\tokenmonitor.ico'/>
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
         <Property Id='DiskPrompt' Value='TokenMonitor Installation'/>
 
@@ -117,14 +117,14 @@
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
-                                Name='rtoken-app.exe'
+                                Name='tokenmonitor-app.exe'
                                 DiskId='1'
-                                Source='$(var.CargoTargetBinDir)\rtoken-app.exe'
+                                Source='$(var.CargoTargetBinDir)\tokenmonitor-app.exe'
                                 KeyPath='yes'/>
                         </Component>
                         <Component Id='AppPath' Guid='*'>
                             <RegistryValue Root='HKLM'
-                                Key='SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\rtoken-app.exe'
+                                Key='SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\tokenmonitor-app.exe'
                                 Value='[#exe0]'
                                 Type='string'
                                 KeyPath='yes'/>
@@ -141,7 +141,7 @@
                             Description='TokenMonitor - AI coding tool token usage tracker'
                             Target='[#exe0]'
                             WorkingDirectory='APPLICATIONFOLDER'
-                            Icon='rtokenICO'/>
+                            Icon='tokenmonitorICO'/>
                         <RemoveFolder Id='ApplicationProgramsFolder' On='uninstall'/>
                         <RegistryValue Root='HKCU'
                             Key='Software\iFence\TokenMonitor'

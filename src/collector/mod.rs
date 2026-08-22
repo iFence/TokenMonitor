@@ -52,6 +52,7 @@ pub struct Collector {
 
 impl Collector {
     pub fn open(db_path: &Path) -> Result<Self> {
+        crate::storage::migrate_legacy_db(db_path);
         let conn = sqlite::open(db_path)?;
         // One-time backfill: adapters leave `cost_micros` unset until the scan
         // pipeline stamps it, so rows written before this feature are all 0.
@@ -90,7 +91,7 @@ impl Collector {
         let sources = self.sources.read().expect("sources lock poisoned").clone();
         let tx = self.tx.clone();
         std::thread::Builder::new()
-            .name("rtoken-scan".into())
+            .name("tokenmonitor-scan".into())
             .spawn(move || {
                 for source in sources.iter() {
                     let provider = source.provider();

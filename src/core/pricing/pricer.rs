@@ -30,7 +30,7 @@ pub const PRICING_VERSION: &str = "1";
 pub const PRICING_VERSION_KEY: &str = "pricing.version";
 
 /// Codex high-context surcharge threshold, in raw input tokens. Codex's raw
-/// `input_tokens` includes the cached portion, which rToken stores as
+/// `input_tokens` includes the cached portion, which TokenMonitor stores as
 /// `input_tokens + cache_read_tokens`.
 const CODEX_HIGH_CONTEXT_TOKENS: u64 = 272_000;
 

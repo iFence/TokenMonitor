@@ -13,7 +13,7 @@ use gpui_component::date_picker::DatePicker;
 use gpui_component::select::Select;
 use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::{ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ChartsState};
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
@@ -23,9 +23,9 @@ use super::DonutChart;
 use crate::ui::format::{format_cost_f64, format_percent_f64, format_tokens_compact_f64};
 
 pub fn render_page(
-    app: &mut RTokenApp,
+    app: &mut TokenMonitorApp,
     _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
 
@@ -44,7 +44,7 @@ pub fn render_page(
     let bucket = trend_bucket(&app.state.charts);
 
     v_flex()
-        .id("rtoken-charts-page")
+        .id("tokenmonitor-charts-page")
         .flex_1()
         .min_w_0()
         .p_4()
@@ -130,7 +130,7 @@ fn main_section(
     data: &Option<ChartsSnapshot>,
     metric: ChartMetric,
     bucket: Bucket,
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
     let content = match data {
@@ -152,7 +152,7 @@ fn model_section(
     metric: ChartMetric,
     app: ChartApp,
     colors: &[Hsla],
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
     let content = match data {
@@ -183,7 +183,7 @@ fn model_section(
     chart_card(cx, &format!("按模型（{}）", app.label()), content)
 }
 
-fn chart_card(cx: &Context<RTokenApp>, title: &str, body: AnyElement) -> AnyElement {
+fn chart_card(cx: &Context<TokenMonitorApp>, title: &str, body: AnyElement) -> AnyElement {
     let p = crate::ui::palette(cx);
     v_flex()
         .flex_1()
@@ -207,7 +207,7 @@ fn empty_hint(text: &str, color: Hsla) -> AnyElement {
         .into_any_element()
 }
 
-fn series_colors(cx: &Context<RTokenApp>) -> Vec<Hsla> {
+fn series_colors(cx: &Context<TokenMonitorApp>) -> Vec<Hsla> {
     let t = cx.theme();
     vec![t.chart_1, t.chart_2, t.chart_3, t.chart_4, t.chart_5]
 }
@@ -314,7 +314,7 @@ fn model_list(
     totals: &[(String, SumStats)],
     metric: ChartMetric,
     colors: &[Hsla],
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
     let fmt = formatter_for(metric);

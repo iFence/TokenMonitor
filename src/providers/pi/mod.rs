@@ -12,14 +12,14 @@
 //!   summaries).
 //!
 //! All three are included — exactly the set pi itself sums into its session
-//! totals — so rToken's numbers match the tool's own counters. Tool and
+//! totals — so TokenMonitor's numbers match the tool's own counters. Tool and
 //! summary usage carry no model of their own, so they are attributed to the
 //! last model in effect (tracked from `model_change` entries and assistant
 //! messages) for pricing.
 //!
 //! Pi's `usage.input` already includes its separate `reasoning` bucket, so the
-//! four rToken buckets are used as-is and stay disjoint: `total_tokens()`
-//! agrees with pi's own `totalTokens`. rToken's dedup is `INSERT OR IGNORE`
+//! four TokenMonitor buckets are used as-is and stay disjoint: `total_tokens()`
+//! agrees with pi's own `totalTokens`. TokenMonitor's dedup is `INSERT OR IGNORE`
 //! and pi entry `id`s are stable, so rescans (and in-place session rewrites)
 //! stay idempotent.
 //!
@@ -337,7 +337,7 @@ mod tests {
     /// change, a user message, then assistant turns carrying usage.
     fn write_session_file(dir: &Path) -> PathBuf {
         let path = dir.join("2026-08-17T07-06-44-886Z_01a00e8b-4b16-7165-ac42-29c02a410ed8.jsonl");
-        let body = r#"{"type":"session","version":3,"id":"01a00e8b-4b16-7165-ac42-29c02a410ed8","timestamp":"2026-08-17T07:06:44.886Z","cwd":"C:\\Users\\yulei\\RustProjects\\rToken"}
+        let body = r#"{"type":"session","version":3,"id":"01a00e8b-4b16-7165-ac42-29c02a410ed8","timestamp":"2026-08-17T07:06:44.886Z","cwd":"C:\\Users\\yulei\\RustProjects\\TokenMonitor"}
 {"type":"model_change","id":"1f05f7c8","parentId":null,"timestamp":"2026-08-17T07:09:43.616Z","provider":"deepseek","modelId":"deepseek-v4-pro"}
 {"type":"message","id":"5ebe36ba","parentId":"1f05f7c8","timestamp":"2026-08-17T07:09:48.376Z","message":{"role":"user","content":[{"type":"text","text":"say hi"}],"timestamp":1786950588373}}
 {"type":"message","id":"6f1a2b3c","parentId":"5ebe36ba","timestamp":"2026-08-17T07:09:48.794Z","message":{"role":"assistant","content":[{"type":"text","text":"hi!"}],"provider":"deepseek","model":"deepseek-v4-pro","usage":{"input":8665,"output":33,"cacheRead":0,"cacheWrite":0,"reasoning":18,"totalTokens":8698,"cost":{"input":0.0037,"output":0.00002,"cacheRead":0,"cacheWrite":0,"total":0.0037}},"stopReason":"stop","timestamp":1786950588794}}
@@ -375,7 +375,7 @@ mod tests {
 
         let first = &records[0];
         assert_eq!(first.provider, Provider::Pi);
-        assert_eq!(first.project, "rToken");
+        assert_eq!(first.project, "TokenMonitor");
         assert_eq!(first.session_id, "01a00e8b-4b16-7165-ac42-29c02a410ed8");
         assert_eq!(first.usage.model, "deepseek-v4-pro");
         // `reasoning` is already inside `input`; buckets stay disjoint and

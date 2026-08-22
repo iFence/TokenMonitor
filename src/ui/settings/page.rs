@@ -16,7 +16,7 @@ use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPa
 use gpui_component::text::TextView;
 use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::ScanInterval;
 use crate::app::update_check::UpdateState;
 use crate::core::model::ThemeColor;
@@ -24,9 +24,9 @@ use crate::core::model::ThemeColor;
 use crate::ui::page_shell;
 
 pub fn render_page(
-    app: &mut RTokenApp,
+    app: &mut TokenMonitorApp,
     _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     let weak = app.weak_self.clone();
     let panel_bg = crate::ui::palette(cx).background;
@@ -48,17 +48,17 @@ pub fn render_page(
 /// The sidebar is painted with the panel background so the sidebar blends
 /// seamlessly with the rest of the page rather than it reading as a darker
 /// (near-black) column.
-fn settings(weak: &WeakEntity<RTokenApp>, panel_bg: Hsla) -> impl IntoElement {
+fn settings(weak: &WeakEntity<TokenMonitorApp>, panel_bg: Hsla) -> impl IntoElement {
     let sidebar_style = StyleRefinement::default().bg(panel_bg);
 
-    Settings::new("rtoken-settings")
+    Settings::new("tokenmonitor-settings")
         .default_selected_index(Default::default())
         .sidebar_style(&sidebar_style)
         .pages([general_page(weak), about_page(weak)])
 }
 
 /// "通用": app-wide behavior settings (rescan interval, accent theme color).
-fn general_page(weak: &WeakEntity<RTokenApp>) -> SettingPage {
+fn general_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
     let weak = weak.clone();
     SettingPage::new("通用")
         .icon(IconName::Settings)
@@ -71,12 +71,12 @@ fn general_page(weak: &WeakEntity<RTokenApp>) -> SettingPage {
         )
 }
 
-/// Dropdown field reading/writing the live [`RTokenApp::scan_interval`].
+/// Dropdown field reading/writing the live [`TokenMonitorApp::scan_interval`].
 ///
 /// The option value is the interval's second count; the label is its human
 /// readable text. Reads/writes go through the captured `WeakEntity` so the
 /// field always reflects the current persisted interval.
-fn scan_interval_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedString> {
+fn scan_interval_field(weak: &WeakEntity<TokenMonitorApp>) -> SettingField<SharedString> {
     let options = ScanInterval::ALL
         .map(|interval| {
             (
@@ -109,7 +109,7 @@ fn scan_interval_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedStrin
 /// Dropdown field reading/writing the app accent [`ThemeColor`]. The option
 /// value is the color's persisted key; the label is its display name. Reads go
 /// through the captured `WeakEntity` so the field reflects the current color.
-fn theme_color_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedString> {
+fn theme_color_field(weak: &WeakEntity<TokenMonitorApp>) -> SettingField<SharedString> {
     let options = ThemeColor::ALL
         .map(|color| {
             (
@@ -138,7 +138,7 @@ fn theme_color_field(weak: &WeakEntity<RTokenApp>) -> SettingField<SharedString>
 }
 
 /// "关于": app name, version, description, and the auto-update controls.
-fn about_page(weak: &WeakEntity<RTokenApp>) -> SettingPage {
+fn about_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
     let weak = weak.clone();
     SettingPage::new("关于")
         .icon(IconName::Info)
@@ -148,7 +148,7 @@ fn about_page(weak: &WeakEntity<RTokenApp>) -> SettingPage {
 /// The about content as a single custom element: name, version, and the update
 /// check / download controls. State is read live through the weak handle each
 /// render so the panel always reflects the latest `update_check`.
-fn about_item(weak: &WeakEntity<RTokenApp>) -> SettingItem {
+fn about_item(weak: &WeakEntity<TokenMonitorApp>) -> SettingItem {
     let portable = crate::platform::is_portable();
     let weak = weak.clone();
     SettingItem::render(move |_, _window: &mut Window, cx: &mut App| {
@@ -303,7 +303,7 @@ fn about_item(weak: &WeakEntity<RTokenApp>) -> SettingItem {
     .keywords(["关于", "更新", "版本"])
 }
 
-fn check_updates_button(weak: &WeakEntity<RTokenApp>, busy: bool) -> Button {
+fn check_updates_button(weak: &WeakEntity<TokenMonitorApp>, busy: bool) -> Button {
     let weak = weak.clone();
     Button::new("about-check-updates")
         .label("检查更新")
@@ -313,7 +313,7 @@ fn check_updates_button(weak: &WeakEntity<RTokenApp>, busy: bool) -> Button {
         })
 }
 
-fn download_install_button(weak: &WeakEntity<RTokenApp>, portable: bool) -> Button {
+fn download_install_button(weak: &WeakEntity<TokenMonitorApp>, portable: bool) -> Button {
     let weak = weak.clone();
     Button::new("about-download-install")
         .label(if portable {
@@ -327,7 +327,7 @@ fn download_install_button(weak: &WeakEntity<RTokenApp>, portable: bool) -> Butt
         })
 }
 
-fn skip_update_button(weak: &WeakEntity<RTokenApp>) -> Button {
+fn skip_update_button(weak: &WeakEntity<TokenMonitorApp>) -> Button {
     let weak = weak.clone();
     Button::new("about-skip-update")
         .label("跳过此版本")

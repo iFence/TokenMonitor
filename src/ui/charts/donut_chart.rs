@@ -23,7 +23,7 @@ impl DonutChart {
             colors: default_colors(),
             inner_ratio: 0.55,
             size: size(px(200.0), px(200.0)),
-            id: ElementId::Name("rtoken-donut-chart".into()),
+            id: ElementId::Name("tokenmonitor-donut-chart".into()),
         }
     }
 

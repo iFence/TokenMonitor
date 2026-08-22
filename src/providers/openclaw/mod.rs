@@ -82,7 +82,7 @@ fn has_any(v: &Value, paths: &[&str]) -> bool {
 /// normalized shape (`input`/`output`/`cacheRead`/`cacheWrite`, where `input`
 /// is already uncached) is the common case; raw OpenAI-style shapes where
 /// `prompt_tokens`/`input_tokens` include the cached portion are re-split so
-/// rToken's buckets stay additive (`input + cacheRead + cacheWrite`). Reasoning
+/// TokenMonitor's buckets stay additive (`input + cacheRead + cacheWrite`). Reasoning
 /// tokens are folded into output, the convention OpenClaw's own conversions use.
 fn parse_usage(u: &Value) -> Option<Tokens> {
     const CACHE_READ_KEYS: &[&str] = &[
@@ -133,7 +133,7 @@ fn parse_usage(u: &Value) -> Option<Tokens> {
     let reasoning = pick_number(u, REASONING_KEYS).unwrap_or(0).max(0) as u64;
 
     // OpenAI-style prompt/input totals include cached tokens; re-split them so
-    // rToken's buckets stay additive. The inclusion flags mirror OpenClaw's own
+    // TokenMonitor's buckets stay additive. The inclusion flags mirror OpenClaw's own
     // `normalizeUsage`: Anthropic-style `cache_creation_input_tokens` is billed
     // separately from `input`, so it never triggers a subtraction.
     let direct_input = u.get("input").and_then(Value::as_i64);
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn handles_openai_style_usage_with_cached_input() {
         let dir = tempdir().unwrap();
-        // prompt_tokens includes the cached portion; rToken re-splits it.
+        // prompt_tokens includes the cached portion; TokenMonitor re-splits it.
         let data = assistant_line(
             "m1",
             "gpt-5.6",

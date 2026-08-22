@@ -28,11 +28,11 @@ use super::state::{
 use super::update_check::UpdateCheckUiState;
 
 /// Root application entity: owns app state, the collector, and the window focus.
-pub struct RTokenApp {
+pub struct TokenMonitorApp {
     pub state: AppState,
     pub collector: Arc<Collector>,
     pub focus_handle: FocusHandle,
-    pub weak_self: WeakEntity<RTokenApp>,
+    pub weak_self: WeakEntity<TokenMonitorApp>,
     /// Keeps the periodic auto-rescan thread alive for the app's lifetime.
     _scheduler: std::thread::JoinHandle<()>,
     view_tx: Sender<ViewSnapshot>,
@@ -58,7 +58,7 @@ pub struct RTokenApp {
     scheduler_wake: std::sync::mpsc::Sender<()>,
 }
 
-impl RTokenApp {
+impl TokenMonitorApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
@@ -99,7 +99,7 @@ impl RTokenApp {
         });
         let chart_range_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
-        let mut app = RTokenApp {
+        let mut app = TokenMonitorApp {
             state: AppState::default(),
             collector,
             focus_handle,
@@ -424,7 +424,7 @@ impl RTokenApp {
         let tx = self.view_tx.clone();
 
         std::thread::Builder::new()
-            .name("rtoken-aggregate".into())
+            .name("tokenmonitor-aggregate".into())
             .spawn(move || {
                 let snapshot =
                     compute_view_snapshot(seq, time_tab, &db_path, window, charts, report);
@@ -529,7 +529,6 @@ fn compute_report_snapshot(repo: &UsageRepo<'_>, window: TimeWindow) -> ReportSn
     }
     snap
 }
-
 /// Compute the charts page's raw per-day series.
 fn compute_chart_snapshot(
     repo: &UsageRepo<'_>,
@@ -576,13 +575,13 @@ fn merge_model_series(
     }
 }
 
-impl Focusable for RTokenApp {
+impl Focusable for TokenMonitorApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for RTokenApp {
+impl Render for TokenMonitorApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use gpui_component::{Theme, ThemeMode};
         if Theme::global(cx).mode != ThemeMode::Dark {
@@ -630,7 +629,7 @@ impl Render for RTokenApp {
 
         let p = crate::ui::palette(cx);
         v_flex()
-            .id("rtoken-root")
+            .id("tokenmonitor-root")
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(p.background)

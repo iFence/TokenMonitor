@@ -24,7 +24,7 @@ pub fn start_scheduler(
     wake: Receiver<()>,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
-        .name("rtoken-scheduler".into())
+        .name("tokenmonitor-scheduler".into())
         .spawn(move || loop {
             let secs = interval_secs.load(Ordering::Relaxed).max(MIN_INTERVAL_SECS);
             match wake.recv_timeout(Duration::from_secs(secs)) {

@@ -61,7 +61,7 @@ fn discover_wsl_roots(suffix: &[&str]) -> Vec<ScanRoot> {
     roots
 }
 
-/// `wsl.exe` is a console-subsystem process; when rToken (a GUI-subsystem app)
+/// `wsl.exe` is a console-subsystem process; when TokenMonitor (a GUI-subsystem app)
 /// spawns it without this flag, Windows allocates a fresh console window that
 /// flashes briefly on every launch.
 #[cfg(windows)]

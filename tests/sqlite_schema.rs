@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use rtoken::storage::sqlite::{init_schema, SCHEMA_SQL};
+use tokenmonitor::storage::sqlite::{init_schema, SCHEMA_SQL};
 
 #[test]
 fn schema_creates_expected_tables() {

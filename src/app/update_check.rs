@@ -10,7 +10,7 @@ use gpui::Context;
 use http_client::{AsyncBody, HttpClient, Method, Request, Response};
 use semver::Version;
 
-use super::app::RTokenApp;
+use super::app::TokenMonitorApp;
 
 const RELEASES_LATEST_URL: &str =
     "https://api.github.com/repos/iFence/TokenMonitor/releases/latest";
@@ -319,7 +319,7 @@ async fn check_update(
     }))
 }
 
-impl RTokenApp {
+impl TokenMonitorApp {
     /// Manual check (surfaces errors) or startup check (silent on failure when
     /// `manual` is false).
     pub fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) {

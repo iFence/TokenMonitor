@@ -16,7 +16,7 @@ use gpui::{
 use gpui::{Hsla, Pixels};
 use gpui_component::{v_flex, ActiveTheme, Colorize, StyledExt};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::ActivePage;
 use crate::core::model::ThemeColor;
 
@@ -98,7 +98,11 @@ pub(crate) fn accent_palette(color: ThemeColor) -> [Hsla; 5] {
 }
 
 /// Render the page active in `app.state`.
-pub fn router(app: &mut RTokenApp, window: &mut Window, cx: &mut Context<RTokenApp>) -> AnyElement {
+pub fn router(
+    app: &mut TokenMonitorApp,
+    window: &mut Window,
+    cx: &mut Context<TokenMonitorApp>,
+) -> AnyElement {
     match app.state.active_page {
         ActivePage::Dashboard => dashboard::render_page(app, window, cx),
         ActivePage::Project => project::render_page(app, window, cx),
@@ -109,13 +113,13 @@ pub fn router(app: &mut RTokenApp, window: &mut Window, cx: &mut Context<RTokenA
 
 /// Standard page container: a scrollable column with a title header.
 pub(crate) fn page_shell(
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
     title: &str,
     subtitle: Option<&str>,
 ) -> Stateful<Div> {
     let p = palette(cx);
     v_flex()
-        .id("rtoken-page")
+        .id("tokenmonitor-page")
         .flex_1()
         .min_w_0()
         .min_h_0()

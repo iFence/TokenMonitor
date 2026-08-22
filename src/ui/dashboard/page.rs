@@ -8,7 +8,7 @@ use gpui::{
 use gpui_component::tab::{Tab, TabBar};
 use gpui_component::{h_flex, v_flex, StyledExt};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::TimeTab;
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
@@ -17,9 +17,9 @@ use crate::ui::report::section::{empty_hint, report_section};
 use super::card::provider_card;
 
 pub fn render_page(
-    app: &mut RTokenApp,
+    app: &mut TokenMonitorApp,
     _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     v_flex()
         .flex_1()
@@ -31,7 +31,7 @@ pub fn render_page(
 
 /// Scrollable page body: report section (fixed 365-day overview) on top, then
 /// the per-agent usage cards for the selected time range.
-fn content(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
+fn content(app: &mut TokenMonitorApp, cx: &mut Context<TokenMonitorApp>) -> AnyElement {
     let report = report_section(app, cx);
     let agents = agent_section(app, cx);
     v_flex()
@@ -52,7 +52,7 @@ fn content(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
 /// per-index element id (`ix`) and a `TabList`/`Tab` role, so every tab gets a
 /// unique a11y node id. Bare `Tab::new()` children would all default to
 /// `ix == 0` and collide with the same a11y node id.
-fn tab_bar(app: &RTokenApp, cx: &Context<RTokenApp>) -> impl IntoElement {
+fn tab_bar(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> impl IntoElement {
     let p = crate::ui::palette(cx);
     let weak = app.weak_self.clone();
     let selected_ix = TimeTab::ALL
@@ -82,7 +82,7 @@ fn tab_bar(app: &RTokenApp, cx: &Context<RTokenApp>) -> impl IntoElement {
 
 /// The "Agent 用量" section: only agents with recorded usage in the selected
 /// window are shown, in cost-descending order (as returned by the DB query).
-fn agent_section(app: &mut RTokenApp, cx: &mut Context<RTokenApp>) -> AnyElement {
+fn agent_section(app: &mut TokenMonitorApp, cx: &mut Context<TokenMonitorApp>) -> AnyElement {
     let p = crate::ui::palette(cx);
     let tab_label = app.state.time_tab.label();
     let used: Vec<(Provider, SumStats)> = app

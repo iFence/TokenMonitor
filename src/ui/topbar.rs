@@ -8,15 +8,15 @@ use gpui_component::{
     h_flex, v_flex, IconName, Selectable, StyledExt,
 };
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::app::state::{ActivePage, ScanStatus};
 use crate::core::time::east8;
 
 /// Render the top bar shared by every page.
 pub fn render_topbar(
-    app: &mut RTokenApp,
+    app: &mut TokenMonitorApp,
     _window: &mut Window,
-    cx: &mut Context<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
 
@@ -30,7 +30,7 @@ pub fn render_topbar(
     };
 
     h_flex()
-        .id("rtoken-topbar")
+        .id("tokenmonitor-topbar")
         .w_full()
         .px_4()
         .py_2()
@@ -90,8 +90,8 @@ pub fn render_topbar(
 }
 
 fn nav_icon(
-    app: &RTokenApp,
-    cx: &mut Context<RTokenApp>,
+    app: &TokenMonitorApp,
+    cx: &mut Context<TokenMonitorApp>,
     id: &'static str,
     icon: IconName,
     page: ActivePage,

@@ -6,7 +6,7 @@
 //! (a streaming usage delta), and `assistant/message` (the authoritative
 //! per-call usage). This adapter emits one record per `assistant/message` —
 //! the completed-call total — and ignores `assistant/chunk`, matching how the
-//! Claude/Codex/CodeBuddy adapters only count finished messages. rToken's
+//! Claude/Codex/CodeBuddy adapters only count finished messages. TokenMonitor's
 //! dedup is `INSERT OR IGNORE` (append-only, no upsert), so folding the
 //! stream into a single record per `(turn, step)` is what keeps rescans
 //! idempotent without double-counting.
@@ -54,7 +54,7 @@ struct EventData {
     header: Option<Header>,
 }
 
-/// DeepSeek usage buckets. `outputTokens` includes `reasoningTokens`; rToken
+/// DeepSeek usage buckets. `outputTokens` includes `reasoningTokens`; TokenMonitor
 /// has no reasoning bucket, so reasoning stays folded into output — this keeps
 /// both `total_tokens()` and the cost (billed on the full output) aligned with
 /// tokei's `raw_out` handling.

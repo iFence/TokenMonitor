@@ -128,9 +128,9 @@ impl AntigravitySource {
     }
 
     /// Open a conversation store without writing to it. Prefers a genuinely
-    /// read-only connection so rToken never contends with a live session; when
+    /// read-only connection so TokenMonitor never contends with a live session; when
     /// that fails (e.g. a WAL file whose `-shm` is missing), falls back to a
-    /// `query_only` connection like rToken's own read path.
+    /// `query_only` connection like TokenMonitor's own read path.
     fn open_db(path: &Path) -> Result<Connection, String> {
         let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
             Ok(c) => c,

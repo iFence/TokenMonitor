@@ -7,17 +7,17 @@ use gpui::{
 };
 use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 
-use crate::app::app::RTokenApp;
+use crate::app::app::TokenMonitorApp;
 use crate::core::aggregation::SumStats;
 use crate::core::model::Provider;
-use crate::ui::charts::DonutChart;
 use crate::ui::format::{format_cost_usd, format_tokens_compact};
+use crate::ui::charts::DonutChart;
 
 /// One provider card: headline totals, cost, cache-hit ring, token details,
 /// and an expandable per-model breakdown.
 pub fn provider_card(
-    cx: &mut Context<RTokenApp>,
-    weak: WeakEntity<RTokenApp>,
+    cx: &mut Context<TokenMonitorApp>,
+    weak: WeakEntity<TokenMonitorApp>,
     provider: Provider,
     stats: SumStats,
     models: Option<&Vec<(String, SumStats)>>,
@@ -122,7 +122,7 @@ pub fn provider_card(
 /// side label, panel.png style. The hit arc uses the app's accent color;
 /// zero-usage cards get a grey placeholder ring.
 fn cache_hit_ring(
-    cx: &Context<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
     provider: Provider,
     stats: &SumStats,
 ) -> impl IntoElement {
@@ -179,7 +179,7 @@ fn cache_hit_ring(
         )
 }
 
-fn detail_cell(cx: &Context<RTokenApp>, label: &str, value: u64) -> impl IntoElement {
+fn detail_cell(cx: &Context<TokenMonitorApp>, label: &str, value: u64) -> impl IntoElement {
     let p = crate::ui::palette(cx);
     v_flex()
         .flex_1()
@@ -200,8 +200,8 @@ fn detail_cell(cx: &Context<RTokenApp>, label: &str, value: u64) -> impl IntoEle
 
 /// The "按模型 (N)" toggle row plus the expanded per-model list.
 fn model_section(
-    cx: &Context<RTokenApp>,
-    weak: WeakEntity<RTokenApp>,
+    cx: &Context<TokenMonitorApp>,
+    weak: WeakEntity<TokenMonitorApp>,
     provider: Provider,
     models: &[(String, SumStats)],
     expanded: bool,

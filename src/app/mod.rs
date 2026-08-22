@@ -6,7 +6,7 @@ pub mod state;
 pub mod update_check;
 
 pub use actions::Quit;
-pub use app::RTokenApp;
+pub use app::TokenMonitorApp;
 pub use state::{
     ActivePage, AppState, ChartApp, ChartMetric, ChartRange, ChartsSnapshot, ChartsState,
     ReportSnapshot, ReportState, ScanStatus, TimeTab, ViewSnapshot,
@@ -45,7 +45,7 @@ pub fn run() -> anyhow::Result<()> {
                 ..Default::default()
             },
             move |window, cx| {
-                let view = cx.new(|cx| RTokenApp::new(window, cx));
+                let view = cx.new(|cx| TokenMonitorApp::new(window, cx));
                 view.update(cx, |app, cx| app.maybe_check_for_updates_on_startup(cx));
                 cx.new(|cx| Root::new(view, window, cx).bordered(false))
             },

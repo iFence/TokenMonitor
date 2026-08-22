@@ -1,12 +1,12 @@
-//! Domain-layer tests exercising the public API of `rtoken::core`.
+//! Domain-layer tests exercising the public API of `tokenmonitor::core`.
 
 use chrono::{Duration, TimeZone, Utc};
 
-use rtoken::aggregation::{by_day, by_model, by_project, by_provider, total};
-use rtoken::model::{Period, Provider, TimeWindow, Usage};
-use rtoken::pricing::Pricer;
-use rtoken::quota::QuotaTracker;
-use rtoken::usage::UsageRecord;
+use tokenmonitor::aggregation::{by_day, by_model, by_project, by_provider, total};
+use tokenmonitor::model::{Period, Provider, TimeWindow, Usage};
+use tokenmonitor::pricing::Pricer;
+use tokenmonitor::quota::QuotaTracker;
+use tokenmonitor::usage::UsageRecord;
 
 fn record(
     provider: Provider,
