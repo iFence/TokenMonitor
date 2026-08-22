@@ -12,7 +12,7 @@ use crate::core::aggregation::SumStats;
 use crate::format::{format_cost_f64, format_tokens_compact_f64};
 use crate::report::heatmap::{level_for, month_labels, ROWS};
 use crate::report::{report_stats, ReportStats};
-use crate::tui::app::TuiApp;
+use crate::tui::app::{TuiApp, TuiView};
 
 /// The five grid levels' background colors, GitHub dark-mode green ramp.
 fn level_color(level: usize) -> Color {
@@ -57,18 +57,34 @@ fn weekday_label(row: i64) -> Span<'static> {
     Span::styled(label, Style::default().fg(Color::Gray))
 }
 
-/// Render the whole screen.
+/// Render the whole screen, dispatching on the selected panel.
 pub fn draw(frame: &mut Frame, app: &TuiApp) {
-    let [header, stats_area, heatmap, breakdown, detail, hint] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        // Month label + 7 weekday rows + legend.
-        Constraint::Length(9),
-        Constraint::Min(0),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(frame.area());
+    match app.view() {
+        TuiView::Overview => draw_overview(frame, app),
+        TuiView::TodayHourly => draw_hourly(frame, app),
+    }
+}
+
+/// The overview: summary cards, heatmap, per-hour chart, and agent/model
+/// breakdowns stacked in one screen.
+fn draw_overview(frame: &mut Frame, app: &TuiApp) {
+    let [header, stats_area, heatmap, _gap1, hours, _gap2, breakdown, detail, hint] =
+        Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            // Month label + 7 weekday rows + legend.
+            Constraint::Length(9),
+            // Blank spacer between the heatmap and the hour chart.
+            Constraint::Length(1),
+            // Per-hour "today" bar chart: title + 4 bar rows + tick labels.
+            Constraint::Length(6),
+            // Blank spacer between the hour chart and the breakdown.
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
 
     let stats = report_stats(app.range_days(), app.today());
 
@@ -131,6 +147,12 @@ pub fn draw(frame: &mut Frame, app: &TuiApp) {
         heatmap,
     );
 
+    // Per-hour bar chart of today's (East-8) usage.
+    frame.render_widget(
+        Paragraph::new(Text::from(hour_chart(app, hours.width as usize))),
+        hours,
+    );
+
     // Per-agent and per-model breakdown, side by side.
     let [agents, models] =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -150,25 +172,30 @@ pub fn draw(frame: &mut Frame, app: &TuiApp) {
     frame.render_widget(Paragraph::new(detail_line(app)), detail);
 
     // Key hints.
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" 退出", Style::default().fg(Color::Gray)),
-            Span::raw("  |  "),
-            Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" 重新扫描", Style::default().fg(Color::Gray)),
-            Span::raw("  |  "),
-            Span::styled("t/T", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(" 时间范围", Style::default().fg(Color::Gray)),
-            Span::raw("  |  "),
-            Span::styled(
-                "←→↑↓ / hjkl / Home / End",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" 移动选中", Style::default().fg(Color::Gray)),
-        ])),
-        hint,
-    );
+    frame.render_widget(Paragraph::new(hint_line()), hint);
+}
+
+/// The hint bar shared by all panels.
+fn hint_line() -> Line<'static> {
+    Line::from(vec![
+        Span::styled("q", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" 退出", Style::default().fg(Color::Gray)),
+        Span::raw("  |  "),
+        Span::styled("r", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" 重新扫描", Style::default().fg(Color::Gray)),
+        Span::raw("  |  "),
+        Span::styled("t/T", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" 时间范围", Style::default().fg(Color::Gray)),
+        Span::raw("  |  "),
+        Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(" 切换面板", Style::default().fg(Color::Gray)),
+        Span::raw("  |  "),
+        Span::styled(
+            "←→↑↓ / hjkl / Home / End",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" 移动选中", Style::default().fg(Color::Gray)),
+    ])
 }
 
 fn busiest_label(stats: &ReportStats) -> String {
@@ -264,6 +291,191 @@ fn heatmap_lines(app: &TuiApp, body_width: usize) -> Vec<Line<'static>> {
     ));
     lines.push(Line::from(legend));
     lines
+}
+
+/// Number of bar rows in the per-hour chart.
+const BAR_ROWS: usize = 4;
+
+/// Per-hour bar chart of today's East-8 usage: a title row, `BAR_ROWS` rows of
+/// vertical bars, and an hour-tick row (every 6 hours). Each hour is one cell
+/// by default, doubled to two when the terminal is wide enough. Bars are drawn
+/// bottom-up and colored by the heatmap's green ramp; the current hour is
+/// yellow.
+fn hour_chart(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
+    use chrono::{Timelike, Utc};
+
+    use crate::core::time::east8_local;
+
+    let hours = app.hour_tokens();
+    let total: u64 = hours.iter().map(|s| s.total_tokens()).sum();
+    let max = hours.iter().map(|s| s.total_tokens()).max().unwrap_or(0);
+    let now_hour = east8_local(Utc::now()).hour() as usize;
+
+    let cell_w = if 24 * 2 <= width { 2 } else { 1 };
+    let full_w = 24 * cell_w;
+
+    let title = if total == 0 {
+        "当日分时 · 今日 · 暂无记录".to_string()
+    } else {
+        format!(
+            "当日分时 · 今日 · 峰值 {} / 时",
+            format_tokens_compact_f64(max as f64)
+        )
+    };
+
+    let mut tick_row: Vec<char> = vec![' '; full_w];
+    for h in [0, 6, 12, 18, 23] {
+        let col = h * cell_w;
+        let label = format!("{h:02}");
+        for (i, c) in label.chars().enumerate() {
+            if col + i < full_w {
+                tick_row[col + i] = c;
+            }
+        }
+    }
+
+    let bar_height = |v: u64| -> usize {
+        if v == 0 {
+            return 0;
+        }
+        let h = ((v as f64 / max as f64) * BAR_ROWS as f64).round() as usize;
+        h.max(1).min(BAR_ROWS)
+    };
+
+    let mut bar_rows: Vec<Vec<Span<'static>>> = vec![Vec::with_capacity(24); BAR_ROWS];
+    for (h, stats) in hours.iter().enumerate() {
+        let v = stats.total_tokens();
+        let height = bar_height(v);
+        let style = if h == now_hour {
+            Style::default().fg(Color::Yellow)
+        } else {
+            let level = ((v as f64 / max as f64) * 7.0).round() as usize;
+            Style::default().fg(level_color((level * 4 / 7).clamp(1, 4)))
+        };
+        for (r, row) in bar_rows.iter_mut().enumerate() {
+            let filled = height >= BAR_ROWS - r;
+            if filled {
+                row.push(Span::styled("█".repeat(cell_w), style));
+            } else {
+                row.push(Span::raw(" ".repeat(cell_w)));
+            }
+        }
+    }
+
+    let mut lines = vec![Line::from(vec![Span::styled(
+        title,
+        Style::default().fg(Color::Gray),
+    )])];
+    for row in bar_rows {
+        lines.push(Line::from(row));
+    }
+    lines.push(Line::from(vec![Span::styled(
+        tick_row.into_iter().collect::<String>(),
+        Style::default().fg(Color::DarkGray),
+    )]));
+    lines
+}
+
+/// Full-screen "today hourly" panel: a two-column list of today's 24 hours
+/// with tokens, cost, and a mini bar scaled to the busiest hour. The current
+/// hour is highlighted in yellow.
+fn draw_hourly(frame: &mut Frame, app: &TuiApp) {
+    let [panel, hint] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+
+    let today = app.today();
+    let max = app
+        .hour_tokens()
+        .iter()
+        .map(|s| s.total_tokens())
+        .max()
+        .unwrap_or(0);
+    let title = if max == 0 {
+        format!(" 今日分时 · {} · 暂无记录 ", today.format("%Y-%m-%d"))
+    } else {
+        format!(
+            " 今日分时 · {} · 峰值 {} / 时 ",
+            today.format("%Y-%m-%d"),
+            format_tokens_compact_f64(max as f64)
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(hourly_lines(app, panel.width as usize))).block(
+            Block::bordered().title(Span::styled(
+                title,
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+        ),
+        panel,
+    );
+    frame.render_widget(Paragraph::new(hint_line()), hint);
+}
+
+/// The 24 hours laid out as two side-by-side columns of 12 rows each.
+fn hourly_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
+    use crate::core::time::east8_local;
+
+    use chrono::Timelike;
+    use chrono::Utc;
+
+    let hours = app.hour_tokens();
+    let max = hours.iter().map(|s| s.total_tokens()).max().unwrap_or(0);
+    let now_hour = east8_local(Utc::now()).hour() as usize;
+
+    let inner = width.saturating_sub(2);
+    let gap_w = 2;
+    let col_w = inner.saturating_sub(gap_w) / 2;
+
+    let mut lines = Vec::with_capacity(12);
+    for r in 0..12 {
+        let mut spans = Vec::new();
+        spans.extend(hour_cell(&hours[r], r, max, now_hour, col_w));
+        spans.push(Span::raw(" ".repeat(gap_w)));
+        spans.extend(hour_cell(&hours[r + 12], r + 12, max, now_hour, col_w));
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+/// One hour cell: a `●` marker for the current hour, `HH时`, compact tokens,
+/// cost, and a mini bar scaled to `max`. Empty hours show an em-dash.
+fn hour_cell(
+    stats: &SumStats,
+    h: usize,
+    max: u64,
+    now_hour: usize,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let tokens = stats.total_tokens();
+    let is_now = h == now_hour;
+
+    let mut content = String::new();
+    content.push(if is_now { '●' } else { ' ' });
+    content.push_str(&format!("{h:02}时 "));
+    if tokens > 0 {
+        content.push_str(&format_tokens_compact_f64(tokens as f64));
+        content.push_str("  ");
+        content.push_str(&format_cost_f64(stats.cost_micros as f64 / 1e6));
+        if max > 0 {
+            let len = ((tokens as f64 / max as f64) * 8.0).ceil() as usize;
+            content.push(' ');
+            content.push_str(&"█".repeat(len.min(8)));
+        }
+    } else {
+        content.push('—');
+    }
+
+    let fg = if is_now {
+        Color::Yellow
+    } else if tokens > 0 {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
+    vec![Span::styled(
+        pad_right(&truncate(&content, width), width),
+        Style::default().fg(fg),
+    )]
 }
 
 /// Maximum number of rows shown per breakdown column.

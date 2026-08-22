@@ -58,3 +58,76 @@ pub fn load_report_by_model(
     v.sort_by(|a, b| b.1.total_tokens().cmp(&a.1.total_tokens()));
     Ok(v)
 }
+
+/// Per-hour aggregates (index 0..24, East-8) of `day`, hours without usage
+/// zero-filled. Backs the TUI's per-hour "today" chart and hourly panel.
+pub fn load_report_hours(conn: &Connection, day: NaiveDate) -> Result<[SumStats; 24]> {
+    let mut hours: [SumStats; 24] = std::array::from_fn(|_| SumStats::default());
+    for (h, stats) in UsageRepo::new(conn).stats_by_hour(&day.format("%Y-%m-%d").to_string())? {
+        if let Some(slot) = hours.get_mut(h as usize) {
+            *slot = stats;
+        }
+    }
+    Ok(hours)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::model::{Provider, Usage};
+    use crate::core::time::east8_to_utc;
+    use crate::core::usage::UsageRecord;
+    use crate::storage::sqlite;
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    /// A record at `east8_hour`:hh:15 on `day` (East-8 wall clock), converted to
+    /// the UTC instant it refers to and stored as RFC3339. `seq` keeps
+    /// fingerprints unique so same-hour records are not deduped away.
+    fn record(day: &str, east8_hour: u32, tokens: u64, seq: u32) -> UsageRecord {
+        let started = NaiveDateTime::parse_from_str(
+            &format!("{day} {east8_hour:02}:15:00"),
+            "%Y-%m-%d %H:%M:%S",
+        )
+        .unwrap();
+        UsageRecord::new(
+            Provider::from_id("codex").unwrap(),
+            "demo".to_string(),
+            "s".to_string(),
+            Usage {
+                model: "test".to_string(),
+                started_at: east8_to_utc(started),
+                input_tokens: tokens,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_micros: 0,
+            },
+            0,
+            format!("{day}-{east8_hour}-{seq}"),
+        )
+    }
+
+    #[test]
+    fn buckets_today_by_east8_hour() {
+        let conn = Connection::open_in_memory().unwrap();
+        sqlite::init_schema(&conn).unwrap();
+        let repo = UsageRepo::new(&conn);
+        repo.batch_insert_dedup(&[
+            record("2026-08-22", 8, 100, 1),
+            record("2026-08-22", 8, 200, 2), // same East-8 hour, summed
+            record("2026-08-22", 14, 50, 3),
+            record("2026-08-22", 23, 30, 4),
+            record("2026-08-21", 23, 999, 5), // previous East-8 day, out of scope
+        ])
+        .unwrap();
+
+        let hours =
+            load_report_hours(&conn, NaiveDate::from_ymd_opt(2026, 8, 22).unwrap()).unwrap();
+        assert_eq!(hours[8].total_tokens(), 300);
+        assert_eq!(hours[14].total_tokens(), 50);
+        assert_eq!(hours[23].total_tokens(), 30);
+        assert_eq!(hours[0].total_tokens(), 0);
+        assert_eq!(hours.iter().map(|s| s.total_tokens()).sum::<u64>(), 380);
+        assert_eq!(hours[8].records, 2);
+    }
+}

@@ -43,7 +43,7 @@ fn event_loop(
     app: &mut TuiApp,
     events: &async_channel::Receiver<CollectorEvent>,
 ) -> Result<()> {
-    use ratatui::crossterm::event::{self, Event};
+    use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
@@ -54,10 +54,15 @@ fn event_loop(
         }
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
-                Event::Key(key) => match app.handle_key(key)? {
-                    Action::Quit => break,
-                    Action::None => {}
-                },
+                // A single physical press can produce Press + Release; act on
+                // the press only, otherwise every key would trigger twice.
+                Event::Key(key) if key.kind != KeyEventKind::Release => {
+                    match app.handle_key(key)? {
+                        Action::Quit => break,
+                        Action::None => {}
+                    }
+                }
+                Event::Key(_) => {}
                 Event::Resize(_, _) => {}
                 _ => {}
             }

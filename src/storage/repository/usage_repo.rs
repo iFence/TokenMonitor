@@ -260,6 +260,33 @@ impl<'a> UsageRepo<'a> {
         self.aggregate_grouped("date(started_at, '+8 hours')", w)
     }
 
+    /// Per-hour aggregates for a single day (`YYYY-MM-DD`), keyed by East-8
+    /// wall-clock hour `00..24`, only hours with recorded usage present.
+    /// `strftime('%H', started_at, '+8 hours')` reproduces the same shift as
+    /// `aggregate_by_day`.
+    pub fn stats_by_hour(&self, day: &str) -> Result<Vec<(u32, SumStats)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT CAST(strftime('%H', started_at, '+8 hours') AS INTEGER),
+                    COUNT(*),
+                    COALESCE(SUM(input_tokens), 0),
+                    COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(cache_read_tokens), 0),
+                    COALESCE(SUM(cache_write_tokens), 0),
+                    COALESCE(SUM(cost_micros), 0)
+             FROM usage_records
+             WHERE date(started_at, '+8 hours') = ?1
+             GROUP BY 1
+             ORDER BY 1",
+        )?;
+        let rows = stmt.query_map(params![day], |row| {
+            let hour = row.get::<_, i64>(0)? as u32;
+            let stats = sum_stats_from_row_at(row, 1)?;
+            Ok((hour, stats))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
     /// Daily series over `w` (East-8 `YYYY-MM-DD` day key), in chronological
     /// ascending order — the shape consumed by time-series charts.
     pub fn daily_series(&self, w: &TimeWindow) -> Result<Vec<(String, SumStats)>> {

@@ -78,6 +78,32 @@ impl TuiRange {
     }
 }
 
+/// Selectable full-screen panel. `Tab` cycles between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TuiView {
+    #[default]
+    Overview,
+    TodayHourly,
+}
+
+impl TuiView {
+    pub const ALL: [TuiView; 2] = [Self::Overview, Self::TodayHourly];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "总览",
+            Self::TodayHourly => "当日分时",
+        }
+    }
+
+    /// The next/previous view in cycling order (`dir < 0` goes backwards).
+    pub fn step(self, dir: isize) -> Self {
+        let ix = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        let n = Self::ALL.len() as isize;
+        Self::ALL[((ix as isize + dir).rem_euclid(n)) as usize]
+    }
+}
+
 /// Interactive TUI state: the loaded 365-day report plus grid selection.
 pub struct TuiApp {
     db_path: PathBuf,
@@ -99,6 +125,11 @@ pub struct TuiApp {
     range: TuiRange,
     /// East-8 days inside the selected range, for the range summary stats.
     range_days: Vec<(NaiveDate, SumStats)>,
+    /// Per-hour aggregates of today (index 0..24, East-8), for the per-hour
+    /// chart and the "today hourly" panel.
+    hour_tokens: [SumStats; 24],
+    /// Full-screen panel currently shown.
+    view: TuiView,
     /// One-line status shown in the header (scan progress / last result).
     pub status: String,
     /// Short summary of the last completed scan.
@@ -120,6 +151,8 @@ impl TuiApp {
             by_model: Vec::new(),
             range: TuiRange::default(),
             range_days: Vec::new(),
+            hour_tokens: std::array::from_fn(|_| SumStats::default()),
+            view: TuiView::default(),
             status: "等待扫描…".to_string(),
             last_scan: None,
         };
@@ -149,6 +182,7 @@ impl TuiApp {
         self.start = grid_start(self.today);
         self.weeks = week_count(self.start, self.today);
         self.selection.0 = self.selection.0.min(self.weeks.saturating_sub(1));
+        self.hour_tokens = crate::report::data::load_report_hours(&conn, self.today)?;
         self.reload_range(&conn)?;
         Ok(())
     }
@@ -211,6 +245,20 @@ impl TuiApp {
         &self.range_days
     }
 
+    /// Per-hour aggregates of today (index 0..24, East-8).
+    pub fn hour_tokens(&self) -> &[SumStats; 24] {
+        &self.hour_tokens
+    }
+
+    pub fn view(&self) -> TuiView {
+        self.view
+    }
+
+    /// Cycle to the next/previous full-screen panel.
+    pub fn cycle_view(&mut self, dir: isize) {
+        self.view = self.view.step(dir);
+    }
+
     /// Apply a collector event, re-loading the report when a scan changed data.
     pub fn handle_collector_event(&mut self, event: CollectorEvent) -> Result<()> {
         match event {
@@ -254,6 +302,9 @@ impl TuiApp {
             // `t` / `T` cycle the time range for the summary + breakdown.
             KeyCode::Char('t') if key.modifiers == KeyModifiers::NONE => self.cycle_range(1)?,
             KeyCode::Char('T') if key.modifiers == KeyModifiers::NONE => self.cycle_range(-1)?,
+            // `Tab` / `Shift+Tab` cycle the full-screen panel.
+            KeyCode::Tab => self.cycle_view(1),
+            KeyCode::BackTab => self.cycle_view(-1),
             KeyCode::Left => self.move_selection(-1, 0),
             KeyCode::Right => self.move_selection(1, 0),
             KeyCode::Up => self.move_selection(0, -1),
