@@ -1,5 +1,5 @@
-//! Platform-specific helpers. Windows is the primary target; macOS and Linux
-//! are placeholders to be completed later.
+//! Platform-specific helpers. Windows is the primary target; Linux supports
+//! the TUI frontend; macOS is a placeholder to be completed later.
 
 #[cfg(target_os = "windows")]
 mod windows;
