@@ -7,6 +7,17 @@
 - 标题下方直接填写会展示在应用更新弹窗中的 Markdown 内容
 - 使用 `---` 或下一个版本标题结束当前版本说明
 
+## v0.3.2
+
+### 🐛 修复
+- **Linux 发布包改为静态 musl 构建**：官方 `linux-x64` tar.gz 包不再动态链接 glibc，可在 glibc ≥ 2.17 的所有发行版（含 RHEL 8 系 / Anolis 8 / AlmaLinux 8 的 glibc 2.28）直接运行，修复旧包在这些系统上报 `GLIBC_2.29 / GLIBC_2.39 not found` 无法启动的问题。
+- **Linux 更新检查可用**：修复 `tokenmonitor-tui -u/--check-update` 与交互面板在 Linux 上始终报 "no matching update asset for platform" 的问题，现在会匹配 `-linux-x64` 的 tar.gz 资产（优先静态 musl 包）。
+
+### 🚀 优化改进
+- **TUI 当日分时跟随热力图选中日期**：总览页逐小时柱状图与「当日分时」面板现展示热力图中选中日期的逐小时统计，不再固定显示今日；选中今日时仍会高亮当前小时。
+
+---
+
 ## v0.3.1
 
 ### ✨ 新增功能
