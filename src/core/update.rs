@@ -106,24 +106,67 @@ pub struct GithubRelease {
     pub prerelease: bool,
 }
 
-/// Select the Windows update asset: the `.msi` installer for an installed
-/// build, or the portable `.zip` for a portable (免安装) build.
-fn select_asset(assets: &[GithubAsset], portable: bool) -> Option<UpdateAsset> {
-    let matches = |name: &str| {
-        if portable {
-            name.ends_with(".zip")
-        } else {
-            name.ends_with(".msi")
+/// Whether an asset name matches this platform's update artifact.
+///
+/// - Windows: installed builds use the `.msi` installer, portable (免安装)
+///   builds use the `.zip` bundle.
+/// - Linux: any `-linux-x64` tarball. Official Linux packages are
+///   statically-linked musl builds, so `-musl` assets are preferred (see
+///   [`select_asset_for_os`]); `portable` is ignored — Linux ships only
+///   portable tarballs.
+/// - Other platforms: no matching assets.
+fn asset_matches(name: &str, portable: bool, os: &str) -> bool {
+    match os {
+        "linux" => name.ends_with("-linux-x64-musl.tar.gz") || name.ends_with("-linux-x64.tar.gz"),
+        "windows" => {
+            if portable {
+                name.ends_with(".zip")
+            } else {
+                name.ends_with(".msi")
+            }
         }
-    };
+        _ => false,
+    }
+}
+
+/// Select the update asset for the running platform.
+///
+/// - Windows: the `.msi` installer for an installed build, or the portable
+///   `.zip` for a portable (免安装) build.
+/// - Linux: a `-linux-x64` tarball, preferring the statically-linked musl
+///   package when both are uploaded.
+fn select_asset(assets: &[GithubAsset], portable: bool) -> Option<UpdateAsset> {
+    select_asset_for_os(assets, portable, std::env::consts::OS)
+}
+
+/// First asset whose name matches this platform (see [`asset_matches`]).
+fn pick_matching<'a>(
+    assets: &'a [GithubAsset],
+    portable: bool,
+    os: &str,
+) -> Option<&'a GithubAsset> {
     assets
         .iter()
-        .find(|asset| matches(&asset.name))
-        .map(|asset| UpdateAsset {
-            name: asset.name.clone(),
-            url: asset.browser_download_url.clone(),
-            size: asset.size,
-        })
+        .find(|asset| asset_matches(&asset.name, portable, os))
+}
+
+/// `select_asset` parametrized by OS so tests can exercise every platform.
+fn select_asset_for_os(assets: &[GithubAsset], portable: bool, os: &str) -> Option<UpdateAsset> {
+    // Official Linux packages are statically-linked musl builds; prefer them
+    // over a glibc tarball uploaded alongside, whatever the asset order.
+    let chosen = if os == "linux" {
+        assets
+            .iter()
+            .find(|asset| asset.name.ends_with("-linux-x64-musl.tar.gz"))
+            .or_else(|| pick_matching(assets, portable, os))
+    } else {
+        pick_matching(assets, portable, os)
+    };
+    chosen.map(|asset| UpdateAsset {
+        name: asset.name.clone(),
+        url: asset.browser_download_url.clone(),
+        size: asset.size,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,6 +432,21 @@ mod tests {
         assert_eq!(notes, "修复了崩溃问题");
     }
 
+    /// Asset named for the host platform so `evaluate_update` exercises the
+    /// real `select_asset` branch regardless of which OS the tests run on.
+    fn host_asset(version: &str) -> GithubAsset {
+        let name = if std::env::consts::OS == "linux" {
+            format!("TokenMonitor-v{version}-linux-x64-musl.tar.gz")
+        } else {
+            format!("TokenMonitor-v{version}-windows-x64.zip")
+        };
+        GithubAsset {
+            name: name.clone(),
+            browser_download_url: format!("https://example.com/{name}"),
+            size: 100,
+        }
+    }
+
     #[test]
     fn select_asset_picks_zip_for_portable_and_msi_for_installed() {
         let assets = vec![
@@ -403,20 +461,68 @@ mod tests {
                 size: 200,
             },
         ];
-        let portable = select_asset(&assets, true).expect("portable asset");
+        let portable = select_asset_for_os(&assets, true, "windows").expect("portable asset");
         assert!(portable.name.ends_with(".zip"));
 
-        let installed = select_asset(&assets, false).expect("installer asset");
+        let installed = select_asset_for_os(&assets, false, "windows").expect("installer asset");
         assert!(installed.name.ends_with(".msi"));
     }
 
     #[test]
-    fn evaluate_update_skips_drafts_and_current_versions() {
-        let assets = vec![GithubAsset {
+    fn select_asset_picks_linux_tarball() {
+        let assets = vec![
+            GithubAsset {
+                name: "TokenMonitor-v0.3.1-linux-x64.tar.gz".into(),
+                browser_download_url: "https://example.com/linux.tar.gz".into(),
+                size: 300,
+            },
+            GithubAsset {
+                name: "TokenMonitor-v0.3.1-linux-x64-musl.tar.gz".into(),
+                browser_download_url: "https://example.com/linux-musl.tar.gz".into(),
+                size: 400,
+            },
+        ];
+
+        // musl is preferred when both tarballs are uploaded.
+        let asset = select_asset_for_os(&assets, true, "linux").expect("linux asset");
+        assert!(asset.name.ends_with("-linux-x64-musl.tar.gz"));
+
+        // `portable` is irrelevant on Linux.
+        let asset = select_asset_for_os(&assets, false, "linux").expect("linux asset");
+        assert!(asset.name.ends_with("-linux-x64-musl.tar.gz"));
+
+        // Only the glibc tarball present → fall back to it.
+        let gnu_only = vec![GithubAsset {
+            name: "TokenMonitor-v0.3.1-linux-x64.tar.gz".into(),
+            browser_download_url: "https://example.com/linux.tar.gz".into(),
+            size: 300,
+        }];
+        let asset = select_asset_for_os(&gnu_only, true, "linux").expect("gnu linux asset");
+        assert!(asset.name.ends_with("-linux-x64.tar.gz"));
+        assert!(!asset.name.ends_with("-musl.tar.gz"));
+    }
+
+    #[test]
+    fn select_asset_ignores_other_platform_assets() {
+        let windows = vec![GithubAsset {
             name: "TokenMonitor-v0.2.2-windows-x64.zip".into(),
             browser_download_url: "https://example.com/portable.zip".into(),
             size: 100,
         }];
+        assert!(select_asset_for_os(&windows, true, "linux").is_none());
+
+        let linux = vec![GithubAsset {
+            name: "TokenMonitor-v0.3.1-linux-x64-musl.tar.gz".into(),
+            browser_download_url: "https://example.com/linux-musl.tar.gz".into(),
+            size: 400,
+        }];
+        assert!(select_asset_for_os(&linux, true, "windows").is_none());
+        assert!(select_asset_for_os(&linux, true, "macos").is_none());
+    }
+
+    #[test]
+    fn evaluate_update_skips_drafts_and_current_versions() {
+        let assets = vec![host_asset("0.2.2")];
 
         // Draft / prerelease releases are ignored.
         let draft = GithubRelease {
