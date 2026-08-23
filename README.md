@@ -5,7 +5,7 @@
   <img src="resources/tokenmonitor.png" alt="TokenMonitor" width="96" height="96">
 </p>
 
-![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=flat-square)
+![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=flat-square)
 
 一个基于 **Rust** 的 AI 编程工具 **Token 用量追踪**应用，提供 GPUI 桌面版与 ratatui 终端版（TUI）两个前端。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、Antigravity、CodeBuddy、WorkBuddy、OpenCode、OpenClaw、Qoder、DeepSeek Harness、Pi）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
 
@@ -79,6 +79,20 @@ cargo build --release --no-default-features --features tui
 .\target\release\tokenmonitor-tui.exe --help   # 查看用法
 .\target\release\tokenmonitor-tui.exe --check-update   # 检查更新并退出
 ```
+
+**Linux 终端版（TUI）**
+
+- Linux 只提供 `tokenmonitor-tui` 终端版，没有桌面版（GPUI）构建。
+- 官方 GitHub Release 的 `linux-x64` tar.gz 包为**静态 musl 构建**，不依赖 glibc 版本，可在所有主流发行版上直接运行（含 glibc 2.28 的 RHEL 8 / AlmaLinux 8 / CentOS 8，以及 glibc 2.17 的 CentOS 7 系），无需安装额外依赖。
+- 从源码编译（Rust stable ≥ 1.95 即可）：
+
+```bash
+cargo build --release --no-default-features --features tui
+./target/release/tokenmonitor-tui          # 启动 TUI
+./target/release/tokenmonitor-tui --check-update   # 检查更新并退出
+```
+
+- Linux 数据目录为 `~/.local/share/tokenmonitor`，与官方包一致。
 
 ## 许可
 
