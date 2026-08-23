@@ -87,8 +87,11 @@ jobs:
             target/TokenMonitor-*-windows-x64.zip
           fail_on_unmatched_files: true
 
+  # Static musl build so the tarball runs on any Linux distro (glibc ≥ 2.17,
+  # RHEL/CentOS 7 系亦可): a dynamic glibc build would tie the binary to the
+  # runner's glibc 2.39, which old distros (RHEL 8 / glibc 2.28) cannot load.
   linux-release:
-    name: Linux TUI tarball
+    name: Linux TUI tarball (static musl)
     needs: create-release
     runs-on: ubuntu-latest
     steps:
@@ -96,17 +99,22 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build TUI binary
-        run: cargo build --release --no-default-features --features tui
+      - name: Install musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - uses: taiki-e/install-action@cargo-zigbuild
+
+      - name: Build static musl TUI binary
+        run: cargo zigbuild --release --no-default-features --features tui --target x86_64-unknown-linux-musl
 
       - name: Package portable tarball
         run: |
           set -euo pipefail
           version="${{ github.ref_name }}"
           version="${version#v}"
-          root="target/TokenMonitor-portable-linux-x64"
+          root="target/TokenMonitor-portable-linux-x64-musl"
           mkdir -p "$root"
-          cp target/release/tokenmonitor-tui "$root/"
+          cp target/x86_64-unknown-linux-musl/release/tokenmonitor-tui "$root/"
           cp README.md "$root/"
           cp LICENSE "$root/"
           # Marker the binary checks at runtime to detect a portable (免安装) layout.
@@ -115,10 +123,13 @@ jobs:
             echo "tokenmonitor-tui is missing from the portable bundle" >&2
             exit 1
           fi
-          tar -czf "target/TokenMonitor-v${version}-linux-x64.tar.gz" -C "$root" .
+          # Build-time check that the binary is statically linked, so a future
+          # runner/toolchain upgrade that silently reintroduces glibc fails CI.
+          file "$root/tokenmonitor-tui" | grep -q "statically linked"
+          tar -czf "target/TokenMonitor-v${version}-linux-x64-musl.tar.gz" -C "$root" .
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/TokenMonitor-*-linux-x64.tar.gz
+          files: target/TokenMonitor-*-linux-x64-musl.tar.gz
           fail_on_unmatched_files: true
