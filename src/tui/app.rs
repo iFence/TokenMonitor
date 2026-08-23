@@ -130,8 +130,8 @@ pub struct TuiApp {
     range: TuiRange,
     /// East-8 days inside the selected range, for the range summary stats.
     range_days: Vec<(NaiveDate, SumStats)>,
-    /// Per-hour aggregates of today (index 0..24, East-8), for the per-hour
-    /// chart and the "today hourly" panel.
+    /// Per-hour aggregates (index 0..24, East-8) of the date under the grid
+    /// selection, backing the overview per-hour chart and the "当日分时" panel.
     hour_tokens: [SumStats; 24],
     /// Full-screen panel currently shown.
     view: TuiView,
@@ -183,11 +183,12 @@ impl TuiApp {
         };
         let _ = app.reload();
         // Start the cursor on the most recent day (today) instead of the
-        // grid's first cell.
+        // grid's first cell, and load that day's per-hour aggregates.
         app.selection = (
             app.weeks.saturating_sub(1),
             app.today.weekday().num_days_from_sunday() as usize,
         );
+        let _ = app.reload_hour_tokens();
         app
     }
 
@@ -207,8 +208,16 @@ impl TuiApp {
         self.start = grid_start(self.today);
         self.weeks = week_count(self.start, self.today);
         self.selection.0 = self.selection.0.min(self.weeks.saturating_sub(1));
-        self.hour_tokens = crate::report::data::load_report_hours(&conn, self.today)?;
+        // Per-hour aggregates follow the grid selection, not always today.
+        self.hour_tokens = crate::report::data::load_report_hours(&conn, self.selected_date())?;
         self.reload_range(&conn)?;
+        Ok(())
+    }
+
+    /// (Re)load the per-hour aggregates for the date under the grid selection.
+    fn reload_hour_tokens(&mut self) -> Result<()> {
+        let conn = crate::storage::sqlite::open_read(&self.db_path)?;
+        self.hour_tokens = crate::report::data::load_report_hours(&conn, self.selected_date())?;
         Ok(())
     }
 
@@ -270,7 +279,7 @@ impl TuiApp {
         &self.range_days
     }
 
-    /// Per-hour aggregates of today (index 0..24, East-8).
+    /// Per-hour aggregates of the selected date (index 0..24, East-8).
     pub fn hour_tokens(&self) -> &[SumStats; 24] {
         &self.hour_tokens
     }
@@ -476,26 +485,45 @@ impl TuiApp {
             // With an update available: `d` downloads, `s` skips it.
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => self.download_update()?,
             KeyCode::Char('s') if key.modifiers == KeyModifiers::NONE => self.skip_update()?,
-            KeyCode::Left => self.move_selection(-1, 0),
-            KeyCode::Right => self.move_selection(1, 0),
-            KeyCode::Up => self.move_selection(0, -1),
-            KeyCode::Down => self.move_selection(0, 1),
-            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => self.move_selection(-1, 0),
-            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => self.move_selection(1, 0),
-            KeyCode::Char('k') if key.modifiers == KeyModifiers::NONE => self.move_selection(0, -1),
-            KeyCode::Char('j') if key.modifiers == KeyModifiers::NONE => self.move_selection(0, 1),
-            KeyCode::Home => self.selection.0 = 0,
-            KeyCode::End => self.selection.0 = self.weeks.saturating_sub(1),
+            KeyCode::Left => self.move_selection(-1, 0)?,
+            KeyCode::Right => self.move_selection(1, 0)?,
+            KeyCode::Up => self.move_selection(0, -1)?,
+            KeyCode::Down => self.move_selection(0, 1)?,
+            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
+                self.move_selection(-1, 0)?
+            }
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+                self.move_selection(1, 0)?
+            }
+            KeyCode::Char('k') if key.modifiers == KeyModifiers::NONE => {
+                self.move_selection(0, -1)?
+            }
+            KeyCode::Char('j') if key.modifiers == KeyModifiers::NONE => {
+                self.move_selection(0, 1)?
+            }
+            KeyCode::Home => {
+                self.selection.0 = 0;
+                self.reload_hour_tokens()?;
+            }
+            KeyCode::End => {
+                self.selection.0 = self.weeks.saturating_sub(1);
+                self.reload_hour_tokens()?;
+            }
             _ => {}
         }
         Ok(Action::None)
     }
 
-    fn move_selection(&mut self, dw: isize, dr: isize) {
+    fn move_selection(&mut self, dw: isize, dr: isize) -> Result<()> {
         let (w, r) = self.selection;
-        self.selection = (
+        let next = (
             ((w as isize + dw).max(0) as usize).min(self.weeks.saturating_sub(1)),
             ((r as isize + dr).max(0) as usize).min((ROWS - 1) as usize),
         );
+        if next == self.selection {
+            return Ok(());
+        }
+        self.selection = next;
+        self.reload_hour_tokens()
     }
 }

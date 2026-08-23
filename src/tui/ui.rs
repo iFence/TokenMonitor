@@ -157,7 +157,7 @@ fn draw_overview(frame: &mut Frame, app: &TuiApp) {
         heatmap,
     );
 
-    // Per-hour bar chart of today's (East-8) usage.
+    // Per-hour bar chart of the selected day's (East-8) usage.
     frame.render_widget(
         Paragraph::new(Text::from(hour_chart(app, hours.width as usize))),
         hours,
@@ -321,17 +321,19 @@ fn heatmap_lines(app: &TuiApp, body_width: usize) -> Vec<Line<'static>> {
 /// Number of bar rows in the per-hour chart.
 const BAR_ROWS: usize = 4;
 
-/// Per-hour bar chart of today's East-8 usage: a title row, `BAR_ROWS` rows of
-/// vertical bars, and an hour-tick row (every 6 hours). Each hour is one cell
-/// by default, doubled to two when the terminal is wide enough. Bars are drawn
-/// bottom-up and colored by the heatmap's green ramp; the current hour is
-/// yellow.
+/// Per-hour bar chart of the selected day's East-8 usage: a title row,
+/// `BAR_ROWS` rows of vertical bars, and an hour-tick row (every 6 hours).
+/// Each hour is one cell by default, doubled to two when the terminal is wide
+/// enough. Bars are drawn bottom-up and colored by the heatmap's green ramp;
+/// the current hour is yellow only when the selected date is today.
 fn hour_chart(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
-    use chrono::{Timelike, Utc};
-
     use crate::core::time::east8_local;
 
+    use chrono::{Timelike, Utc};
+
     let hours = app.hour_tokens();
+    let date = app.selected_date();
+    let is_today = date == app.today();
     let total: u64 = hours.iter().map(|s| s.total_tokens()).sum();
     let max = hours.iter().map(|s| s.total_tokens()).max().unwrap_or(0);
     let now_hour = east8_local(Utc::now()).hour() as usize;
@@ -339,11 +341,16 @@ fn hour_chart(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     let cell_w = if 24 * 2 <= width { 2 } else { 1 };
     let full_w = 24 * cell_w;
 
+    let day_label = if is_today {
+        "今日".to_string()
+    } else {
+        date.format("%m-%d").to_string()
+    };
     let title = if total == 0 {
-        "当日分时 · 今日 · 暂无记录".to_string()
+        format!("当日分时 · {day_label} · 暂无记录")
     } else {
         format!(
-            "当日分时 · 今日 · 峰值 {} / 时",
+            "当日分时 · {day_label} · 峰值 {} / 时",
             format_tokens_compact_f64(max as f64)
         )
     };
@@ -371,7 +378,7 @@ fn hour_chart(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     for (h, stats) in hours.iter().enumerate() {
         let v = stats.total_tokens();
         let height = bar_height(v);
-        let style = if h == now_hour {
+        let style = if is_today && h == now_hour {
             Style::default().fg(Color::Yellow)
         } else {
             let level = ((v as f64 / max as f64) * 7.0).round() as usize;
@@ -401,14 +408,14 @@ fn hour_chart(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
-/// Full-screen "today hourly" panel: a two-column list of today's 24 hours
-/// with tokens, cost, and a mini bar scaled to the busiest hour. The current
-/// hour is highlighted in yellow.
+/// Full-screen "当日分时" panel: a two-column list of the selected day's 24
+/// hours with tokens, cost, and a mini bar scaled to the busiest hour. The
+/// current hour is highlighted in yellow only when the selected date is today.
 fn draw_hourly(frame: &mut Frame, app: &TuiApp) {
     let [panel, hint] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
 
-    let today = app.today();
+    let date = app.selected_date();
     let max = app
         .hour_tokens()
         .iter()
@@ -416,11 +423,11 @@ fn draw_hourly(frame: &mut Frame, app: &TuiApp) {
         .max()
         .unwrap_or(0);
     let title = if max == 0 {
-        format!(" 今日分时 · {} · 暂无记录 ", today.format("%Y-%m-%d"))
+        format!(" 当日分时 · {} · 暂无记录 ", date.format("%Y-%m-%d"))
     } else {
         format!(
-            " 今日分时 · {} · 峰值 {} / 时 ",
-            today.format("%Y-%m-%d"),
+            " 当日分时 · {} · 峰值 {} / 时 ",
+            date.format("%Y-%m-%d"),
             format_tokens_compact_f64(max as f64)
         )
     };
@@ -593,7 +600,9 @@ fn hourly_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
 
     let hours = app.hour_tokens();
     let max = hours.iter().map(|s| s.total_tokens()).max().unwrap_or(0);
-    let now_hour = east8_local(Utc::now()).hour() as usize;
+    // The current-hour marker only makes sense on today's own grid row.
+    let now_hour =
+        (app.selected_date() == app.today()).then(|| east8_local(Utc::now()).hour() as usize);
 
     let inner = width.saturating_sub(2);
     let gap_w = 2;
@@ -610,17 +619,18 @@ fn hourly_lines(app: &TuiApp, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
-/// One hour cell: a `●` marker for the current hour, `HH时`, compact tokens,
-/// cost, and a mini bar scaled to `max`. Empty hours show an em-dash.
+/// One hour cell: a `●` marker for the current hour (when the selected date is
+/// today), `HH时`, compact tokens, cost, and a mini bar scaled to `max`.
+/// Empty hours show an em-dash.
 fn hour_cell(
     stats: &SumStats,
     h: usize,
     max: u64,
-    now_hour: usize,
+    now_hour: Option<usize>,
     width: usize,
 ) -> Vec<Span<'static>> {
     let tokens = stats.total_tokens();
-    let is_now = h == now_hour;
+    let is_now = Some(h) == now_hour;
 
     let mut content = String::new();
     content.push(if is_now { '●' } else { ' ' });
