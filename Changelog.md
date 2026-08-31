@@ -7,6 +7,22 @@
 - 标题下方直接填写会展示在应用更新弹窗中的 Markdown 内容
 - 使用 `---` 或下一个版本标题结束当前版本说明
 
+## v0.3.3
+
+### ✨ 新增功能
+- **Gemini CLI 用量统计**：解析 `$GEMINI_CLI_HOME/tmp/*/chats/*.json`（回退 `~/.gemini/tmp/*/chats/*.json`）会话中的 `usageMetadata`，纳入输入/输出/缓存读统计。
+- **Qoder 用量统计**：改为读取 Qoder CN 本地 SQLite（`%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`，macOS/Linux 对应路径，可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖），纳入 Token 用量。
+- **WorkBuddy SQLite 兜底**：当会话 jsonl 未记录用量（如额度耗尽）时，改从 `workbuddy.db` 的 `session_usage` 读取会话级输入 Token，补齐此前漏统计。
+
+### 🚀 优化改进
+- **OpenCode 多数据源**：除 `opencode.db` 外同时读取 `opencode-stable.db`（其它渠道）与旧版 `storage/message/*.json`，并按消息 id 跨源去重，避免重复统计。
+- **WSL 多根目录**：CodeBuddy、WorkBuddy 改为自动发现并纳入各 WSL 发行版的数据，与本地数据按根目录命名去重。
+- **OpenClaw 旧版数据**：在 `.openclaw` 与 `.clawdbot` 之外，追加 `.moltbot`、`.moldbot` 旧版会话目录。
+- **DeepSeek 未压缩会话**：兼容未压缩的 `session.jsonl`（此前仅支持 `.jsonl.zstd`）。
+- **数据源对照文档**：新增 `docs/data-sources.md`，逐工具列明本应用与参考项目的读取路径及去重约定。
+
+---
+
 ## v0.3.2
 
 ### 🐛 修复
