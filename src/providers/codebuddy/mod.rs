@@ -14,6 +14,7 @@
 //! path component of `cwd`, and the session id from `sessionId`.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -22,9 +23,10 @@ use serde_json::Value;
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
+use super::roots::discover_roots;
 use super::source::{
-    dir_fingerprint, for_each_line, scan_jsonl_dir_incremental, FileStates, ProviderConfig,
-    ProviderError, ProviderSource, ScanOutput,
+    for_each_line, roots_fingerprint, scan_roots_incremental, FileStates, ProviderConfig,
+    ProviderError, ProviderSource, ScanOutput, ScanRoot,
 };
 
 /// Minimal view of a CodeBuddy session line. One all-optional shape covers every
@@ -63,13 +65,20 @@ struct UsageLine {
 
 pub struct CodebuddySource {
     config: ProviderConfig,
+    /// Discovered scan roots, computed lazily on the first scan (background
+    /// thread) so WSL discovery never blocks UI startup.
+    roots: OnceLock<Vec<ScanRoot>>,
 }
 
 impl CodebuddySource {
     pub fn new(config: ProviderConfig) -> Self {
-        CodebuddySource { config }
+        CodebuddySource {
+            config,
+            roots: OnceLock::new(),
+        }
     }
 
+    #[cfg(test)]
     fn base_dir(&self) -> Result<PathBuf, ProviderError> {
         if let Some(dir) = &self.config.data_dir_override {
             return Ok(dir.clone());
@@ -79,6 +88,7 @@ impl CodebuddySource {
         Ok(home.join(".codebuddy").join("projects"))
     }
 
+    #[cfg(test)]
     fn data_dir(&self) -> Result<PathBuf, ProviderError> {
         let dir = self.base_dir()?;
         if dir.is_dir() {
@@ -86,6 +96,27 @@ impl CodebuddySource {
         } else {
             Err(ProviderError::DataDirNotFound(Provider::Codebuddy))
         }
+    }
+
+    fn roots(&self) -> &[ScanRoot] {
+        self.roots.get_or_init(|| {
+            if let Some(dir) = &self.config.data_dir_override {
+                vec![ScanRoot {
+                    dir: dir.clone(),
+                    label: None,
+                }]
+            } else {
+                discover_roots(&[".codebuddy", "projects"])
+            }
+        })
+    }
+
+    fn existing_roots(&self) -> Vec<ScanRoot> {
+        self.roots()
+            .iter()
+            .filter(|r| r.dir.is_dir())
+            .cloned()
+            .collect()
     }
 
     /// Stream the file line-by-line, emitting one record per usage-bearing
@@ -182,7 +213,12 @@ impl ProviderSource for CodebuddySource {
     }
 
     fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
-        Ok(vec![self.data_dir()?])
+        let dirs: Vec<PathBuf> = self.existing_roots().into_iter().map(|r| r.dir).collect();
+        if dirs.is_empty() {
+            Err(ProviderError::DataDirNotFound(Provider::Codebuddy))
+        } else {
+            Ok(dirs)
+        }
     }
 
     fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
@@ -194,10 +230,13 @@ impl ProviderSource for CodebuddySource {
         emit: &mut dyn FnMut(UsageRecord),
         known: &FileStates,
     ) -> Result<ScanOutput, ProviderError> {
-        let dir = self.data_dir()?;
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Codebuddy));
+        }
         let mut errors = Vec::new();
-        let (found_files, fingerprint, file_states) = scan_jsonl_dir_incremental(
-            &dir,
+        let (found_files, fingerprint, file_states) = scan_roots_incremental(
+            &roots,
             &self.config,
             emit,
             &mut errors,
@@ -213,8 +252,11 @@ impl ProviderSource for CodebuddySource {
     }
 
     fn scan_fingerprint(&self) -> Result<String, ProviderError> {
-        let dir = self.data_dir()?;
-        dir_fingerprint(&dir, self.config.max_depth, self.config.max_file_size)
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Codebuddy));
+        }
+        roots_fingerprint(&roots, self.config.max_depth, self.config.max_file_size)
     }
 }
 

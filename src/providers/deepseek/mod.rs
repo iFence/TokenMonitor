@@ -138,12 +138,17 @@ impl DeepSeekSource {
         let mut session_id = path
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|n| n.strip_suffix(".jsonl.zstd").unwrap_or(n).to_string())
+            .map(|n| {
+                n.strip_suffix(".jsonl.zstd")
+                    .or_else(|| n.strip_suffix(".jsonl"))
+                    .unwrap_or(n)
+                    .to_string()
+            })
             .unwrap_or_default();
         let mut project = String::new();
         let mut model = DEFAULT_MODEL.to_string();
 
-        for_each_decompressed_line(path, |line| {
+        for_each_session_line(path, |line| {
             if let Some(r) = Self::parse_line(line, &mut session_id, &mut project, &mut model, rel)
             {
                 emit(r);
@@ -266,20 +271,30 @@ impl DeepSeekSource {
     }
 }
 
-/// A `.jsonl.zstd` session file (the raw harness format).
+/// A DeepSeek harness session file: `.jsonl.zstd` (compressed) or `.jsonl`
+/// (uncompressed when the harness wrote it without compression).
 fn is_harness_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.ends_with(".jsonl.zstd"))
+        .is_some_and(|n| n.ends_with(".jsonl.zstd") || n.ends_with(".jsonl"))
 }
 
-/// Decompress `path` and stream it line-by-line (lossy UTF-8, mirroring
-/// `source::for_each_line`), never holding the whole file in memory.
-fn for_each_decompressed_line(path: &Path, mut on_line: impl FnMut(&str)) -> Result<(), String> {
+/// Stream `path` line-by-line (lossy UTF-8, mirroring `source::for_each_line`),
+/// decompressing zstd first when the file is `.jsonl.zstd`; never holds the
+/// whole file in memory.
+fn for_each_session_line(path: &Path, mut on_line: impl FnMut(&str)) -> Result<(), String> {
     let file = File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
-    let decoder = zstd::stream::read::Decoder::new(BufReader::new(file))
-        .map_err(|e| format!("zstd {path:?}: {e}"))?;
-    let mut reader = BufReader::new(decoder);
+    let compressed = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with(".jsonl.zstd"));
+    let mut reader: Box<dyn BufRead> = if compressed {
+        let decoder = zstd::stream::read::Decoder::new(BufReader::new(file))
+            .map_err(|e| format!("zstd {path:?}: {e}"))?;
+        Box::new(BufReader::new(decoder))
+    } else {
+        Box::new(BufReader::new(file))
+    };
     let mut buf: Vec<u8> = Vec::with_capacity(8 * 1024);
     loop {
         buf.clear();
@@ -494,6 +509,28 @@ mod tests {
         assert_eq!(r.usage.total_tokens(), 1145);
         // Dedup key is `<rel>:<turn>:<step>`, stable across rescans.
         assert!(r.fingerprint.ends_with(":1:2"));
+    }
+
+    #[test]
+    fn parses_uncompressed_jsonl_session() {
+        let dir = tempdir().unwrap();
+        // The harness may write an uncompressed `session.jsonl` (no zstd).
+        let body = format!(
+            "{}\n{}\n",
+            r#"{"type":"session","id":"session-plain","cwd":"/tmp/plain-project"}"#,
+            message_event(1704672001000, 1, 1, "deepseek-v4-pro"),
+        );
+        fs::write(dir.path().join("session.jsonl"), body).unwrap();
+
+        let (out, records) = scan_collect(&source_for(dir.path()));
+        assert_eq!(out.found_files, 1, "uncompressed jsonl is counted");
+        assert!(out.errors.is_empty());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].session_id, "session-plain");
+        assert_eq!(records[0].project, "plain-project");
+        assert_eq!(records[0].usage.total_tokens(), 1145);
+        // Fingerprint retains the on-disk file name (no .zstd rewrite).
+        assert!(records[0].fingerprint.starts_with("session.jsonl:"));
     }
 
     #[test]

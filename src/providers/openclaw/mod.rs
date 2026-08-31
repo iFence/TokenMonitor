@@ -205,17 +205,21 @@ impl OpenClawSource {
                 }];
             }
             let mut roots = discover_roots(&[".openclaw"]);
-            // Pre-rebrand state dir (`~/.clawdbot`): labelled so records from it
-            // never collide with the `.openclaw` root's fingerprints.
-            for root in discover_roots(&[".clawdbot"]) {
-                let label = match root.label {
-                    Some(wsl) => format!("clawdbot/{wsl}"),
-                    None => "clawdbot".to_string(),
-                };
-                roots.push(ScanRoot {
-                    dir: root.dir,
-                    label: Some(label),
-                });
+            // Pre-rebrand state dirs (`.clawdbot`, `.moltbot`, `.moldbot`):
+            // labelled so records from them never collide with the `.openclaw`
+            // root's fingerprints, and never with each other.
+            for legacy in [".clawdbot", ".moltbot", ".moldbot"] {
+                for root in discover_roots(&[legacy]) {
+                    let base = legacy.trim_start_matches('.');
+                    let label = match root.label {
+                        Some(wsl) => format!("{base}/{wsl}"),
+                        None => base.to_string(),
+                    };
+                    roots.push(ScanRoot {
+                        dir: root.dir,
+                        label: Some(label),
+                    });
+                }
             }
             roots
         })

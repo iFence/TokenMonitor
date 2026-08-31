@@ -21,18 +21,23 @@
 //! read from `prompt_cache_write_tokens` (or `cache_creation_input_tokens`) so
 //! the bucket never silently drops cached writes.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
+use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
 
+use super::roots::discover_roots;
 use super::source::{
-    dir_fingerprint, for_each_line, scan_jsonl_dir_incremental, FileStates, ProviderConfig,
-    ProviderError, ProviderSource, ScanOutput,
+    for_each_line, roots_fingerprint, scan_roots_incremental, FileStates, ProviderConfig,
+    ProviderError, ProviderSource, ScanOutput, ScanRoot,
 };
 
 /// Minimal view of a WorkBuddy session line. One all-optional shape covers
@@ -143,13 +148,20 @@ fn is_workbuddy_timestamp(s: &str) -> bool {
 
 pub struct WorkbuddySource {
     config: ProviderConfig,
+    /// Discovered scan roots, computed lazily on the first scan (background
+    /// thread) so WSL discovery never blocks UI startup.
+    roots: OnceLock<Vec<ScanRoot>>,
 }
 
 impl WorkbuddySource {
     pub fn new(config: ProviderConfig) -> Self {
-        WorkbuddySource { config }
+        WorkbuddySource {
+            config,
+            roots: OnceLock::new(),
+        }
     }
 
+    #[cfg(test)]
     fn base_dir(&self) -> Result<PathBuf, ProviderError> {
         if let Some(dir) = &self.config.data_dir_override {
             return Ok(dir.clone());
@@ -159,6 +171,30 @@ impl WorkbuddySource {
         Ok(home.join(".workbuddy").join("projects"))
     }
 
+    fn roots(&self) -> &[ScanRoot] {
+        self.roots.get_or_init(|| {
+            if let Some(dir) = &self.config.data_dir_override {
+                vec![ScanRoot {
+                    dir: dir.clone(),
+                    label: None,
+                }]
+            } else {
+                discover_roots(&[".workbuddy", "projects"])
+            }
+        })
+    }
+
+    fn existing_roots(&self) -> Vec<ScanRoot> {
+        self.roots()
+            .iter()
+            .filter(|r| r.dir.is_dir())
+            .cloned()
+            .collect()
+    }
+
+    /// Test-only helper: the single primary (home) projects root, erroring when
+    /// it does not exist.
+    #[cfg(test)]
     fn data_dir(&self) -> Result<PathBuf, ProviderError> {
         let dir = self.base_dir()?;
         if dir.is_dir() {
@@ -166,6 +202,144 @@ impl WorkbuddySource {
         } else {
             Err(ProviderError::DataDirNotFound(Provider::Workbuddy))
         }
+    }
+
+    /// The per-root SQLite ledger is a sibling of the `projects` dir
+    /// (`~/.workbuddy/workbuddy.db`), not the scan root itself.
+    fn db_path(root: &ScanRoot) -> PathBuf {
+        root.dir.parent().unwrap_or(&root.dir).join("workbuddy.db")
+    }
+
+    /// Read-only open (with a `query_only` fallback for a WAL missing its
+    /// `-shm`), never contending with WorkBuddy's live database.
+    fn open_db(path: &Path) -> Result<Connection, String> {
+        let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => {
+                let c = Connection::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
+                c.pragma_update(None, "query_only", "ON")
+                    .map_err(|e| format!("query_only {path:?}: {e}"))?;
+                c
+            }
+        };
+        conn.busy_timeout(Duration::from_secs(2))
+            .map_err(|e| format!("busy_timeout {path:?}: {e}"))?;
+        Ok(conn)
+    }
+
+    /// Change-detection stats over one root's SQLite ledger (plus WAL/SHM).
+    fn db_stats(root: &ScanRoot) -> (u64, i64, u64) {
+        let db = Self::db_path(root);
+        if !db.is_file() {
+            return (0, 0, 0);
+        }
+        let mut found = 0u64;
+        let mut max_mtime = 0i64;
+        let mut total_bytes = 0u64;
+        for f in [
+            &db,
+            &db.with_extension("db-wal"),
+            &db.with_extension("db-shm"),
+        ] {
+            let Ok(meta) = std::fs::metadata(f) else {
+                continue;
+            };
+            found += 1;
+            total_bytes += meta.len();
+            if let Ok(modified) = meta.modified() {
+                if let Ok(unix) = modified.duration_since(std::time::UNIX_EPOCH) {
+                    max_mtime = max_mtime.max(unix.as_secs() as i64);
+                }
+            }
+        }
+        (found, max_mtime, total_bytes)
+    }
+
+    /// Combine the jsonl fingerprint with the SQLite ledger signal so a change
+    /// to either source triggers a rescan.
+    fn combined_fingerprint(jsonl_fp: String, roots: &[ScanRoot]) -> String {
+        let mut found = 0u64;
+        let mut max_mtime = 0i64;
+        let mut total_bytes = 0u64;
+        for root in roots {
+            let (f, m, b) = Self::db_stats(root);
+            found += f;
+            max_mtime = max_mtime.max(m);
+            total_bytes += b;
+        }
+        format!("{jsonl_fp}|{found}:{max_mtime}:{total_bytes}")
+    }
+
+    /// Emit one session-level input-token record per session that has a ledger
+    /// entry but no usage in the jsonl transcripts (e.g. a session that hit a
+    /// quota error before writing usage lines). `covered` holds session ids
+    /// already counted from jsonl, so a session is never double counted.
+    fn scan_db_fallback(
+        root: &ScanRoot,
+        covered: &HashSet<String>,
+        emit: &mut dyn FnMut(UsageRecord),
+    ) -> Result<(), String> {
+        let db = Self::db_path(root);
+        if !db.is_file() {
+            return Ok(());
+        }
+        let conn = Self::open_db(&db)?;
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT s.id, s.cwd, s.model, s.created_at, u.used
+                 FROM sessions s
+                 JOIN session_usage u ON u.session_id = s.id
+                 WHERE u.used > 0",
+        ) else {
+            // Schema changed (no sessions/session_usage tables): fall back
+            // silently rather than surfacing an error every scan.
+            return Ok(());
+        };
+        let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        }) else {
+            return Ok(());
+        };
+        let rel = match &root.label {
+            Some(label) => Path::new(label).join("workbuddy.db"),
+            None => PathBuf::from("workbuddy.db"),
+        };
+        for row in rows {
+            let (id, cwd, model, created_at, used) = row.map_err(|e| format!("row: {e}"))?;
+            if covered.contains(&id) {
+                continue;
+            }
+            let project = cwd
+                .as_deref()
+                .map(project_from_cwd)
+                .unwrap_or_else(|| "unknown".to_string());
+            let started_at = Utc
+                .timestamp_millis_opt(created_at)
+                .single()
+                .unwrap_or_else(Utc::now);
+            emit(UsageRecord::new(
+                Provider::Workbuddy,
+                project,
+                id.clone(),
+                Usage {
+                    model: model.unwrap_or_default(),
+                    started_at,
+                    input_tokens: used.max(0) as u64,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_micros: 0,
+                },
+                0,
+                format!("{}:{id}", rel.display()),
+            ));
+        }
+        Ok(())
     }
 
     /// Stream the file line-by-line, emitting one record per usage-bearing
@@ -296,7 +470,12 @@ impl ProviderSource for WorkbuddySource {
     }
 
     fn data_dirs(&self) -> Result<Vec<PathBuf>, ProviderError> {
-        Ok(vec![self.data_dir()?])
+        let dirs: Vec<PathBuf> = self.existing_roots().into_iter().map(|r| r.dir).collect();
+        if dirs.is_empty() {
+            Err(ProviderError::DataDirNotFound(Provider::Workbuddy))
+        } else {
+            Ok(dirs)
+        }
     }
 
     fn scan(&self, emit: &mut dyn FnMut(UsageRecord)) -> Result<ScanOutput, ProviderError> {
@@ -308,27 +487,43 @@ impl ProviderSource for WorkbuddySource {
         emit: &mut dyn FnMut(UsageRecord),
         known: &FileStates,
     ) -> Result<ScanOutput, ProviderError> {
-        let dir = self.data_dir()?;
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Workbuddy));
+        }
         let mut errors = Vec::new();
-        let (found_files, fingerprint, file_states) = scan_jsonl_dir_incremental(
-            &dir,
+        let mut covered: HashSet<String> = HashSet::new();
+        let (found_files, jsonl_fp, file_states) = scan_roots_incremental(
+            &roots,
             &self.config,
-            emit,
+            &mut |r| {
+                covered.insert(r.session_id.clone());
+                emit(r);
+            },
             &mut errors,
             &mut |path, rel, file_emit| Self::parse_file(path, rel, file_emit),
             known,
         );
+        for root in &roots {
+            if let Err(e) = Self::scan_db_fallback(root, &covered, emit) {
+                errors.push(e);
+            }
+        }
         Ok(ScanOutput {
             found_files,
-            fingerprint,
+            fingerprint: Self::combined_fingerprint(jsonl_fp, &roots),
             file_states: Some(file_states),
             errors,
         })
     }
 
     fn scan_fingerprint(&self) -> Result<String, ProviderError> {
-        let dir = self.data_dir()?;
-        dir_fingerprint(&dir, self.config.max_depth, self.config.max_file_size)
+        let roots = self.existing_roots();
+        if roots.is_empty() {
+            return Err(ProviderError::DataDirNotFound(Provider::Workbuddy));
+        }
+        let jsonl_fp = roots_fingerprint(&roots, self.config.max_depth, self.config.max_file_size)?;
+        Ok(Self::combined_fingerprint(jsonl_fp, &roots))
     }
 }
 
@@ -603,5 +798,59 @@ mod tests {
         assert!(!is_workbuddy_timestamp("demo"));
         assert!(!is_workbuddy_timestamp("2026-8-31-17-40-20"));
         assert!(!is_workbuddy_timestamp("2026-08-31"));
+    }
+
+    #[test]
+    fn sqlite_fallback_counts_sessions_without_jsonl_usage() {
+        let root = tempdir().unwrap();
+        let projects = root.path().join("projects");
+        fs::create_dir_all(&projects).unwrap();
+        // A session whose jsonl has no usage line (e.g. it hit a quota error
+        // before writing usage) so it is not covered by the transcript scan.
+        fs::write(
+            projects.join("s.sql.jsonl"),
+            r#"{"id":"m1","timestamp":1788169225430,"type":"message","role":"user","sessionId":"sess-x","cwd":"c:\\Users\\ZHY\\WorkBuddy\\2026-08-31-17-40-20","content":[{"type":"input_text","text":"hi"}]}
+"#,
+        )
+        .unwrap();
+
+        // The SQLite ledger records the real per-session input tokens.
+        let conn = Connection::open(root.path().join("workbuddy.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                cwd TEXT NOT NULL,
+                user_id TEXT,
+                model TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE session_usage (
+                session_id TEXT PRIMARY KEY,
+                used INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, cwd, user_id, model, created_at)
+             VALUES (?1, ?2, 'u', 'auto', 1788169225557)",
+            rusqlite::params!["sess-x", r"c:\Users\ZHY\WorkBuddy\2026-08-31-17-40-20"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_usage (session_id, used, size, updated_at)
+             VALUES (?1, 56852, 168000, 1788169465879)",
+            rusqlite::params!["sess-x"],
+        )
+        .unwrap();
+
+        let (_, records) = scan_collect(&source_for(&projects));
+        assert_eq!(records.len(), 1, "the ledger-only session is counted once");
+        assert_eq!(records[0].session_id, "sess-x");
+        assert_eq!(records[0].usage.input_tokens, 56852);
+        // WorkBuddy launch workspace: labelled by its workspace root.
+        assert_eq!(records[0].project, "WorkBuddy");
+        assert!(records[0].fingerprint.starts_with("workbuddy.db:sess-x"));
     }
 }

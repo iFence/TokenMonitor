@@ -60,26 +60,7 @@ pub struct ScanRoot {
     pub label: Option<String>,
 }
 
-/// Cheap change detector: walk `dir` and stat each JSONL file without reading
-/// it. Files skipped by a full scan (non-JSONL, oversized, unreadable metadata)
-/// are excluded the same way, so an unchanged tree yields the same fingerprint
-/// every call. A few ms for hundreds of files — safe to run every poll cycle.
-pub(crate) fn dir_fingerprint(
-    dir: &Path,
-    max_depth: usize,
-    max_file_size: u64,
-) -> Result<String, ProviderError> {
-    roots_fingerprint(
-        &[ScanRoot {
-            dir: dir.to_path_buf(),
-            label: None,
-        }],
-        max_depth,
-        max_file_size,
-    )
-}
-
-/// Multi-root variant of [`dir_fingerprint`]: aggregates file count, newest
+/// Multi-root change detector: aggregates file count, newest
 /// mtime and total bytes across every root into one fingerprint string.
 pub(crate) fn roots_fingerprint(
     roots: &[ScanRoot],
@@ -178,29 +159,6 @@ pub(crate) fn for_each_line(
         on_line(&String::from_utf8_lossy(&buf), line_idx);
         line_idx += 1;
     }
-}
-
-/// Incremental single-dir scan: files whose state is unchanged in `known` are
-/// skipped. Returns the fresh per-file state to persist.
-pub(crate) fn scan_jsonl_dir_incremental(
-    dir: &Path,
-    config: &ProviderConfig,
-    emit: &mut dyn FnMut(UsageRecord),
-    errors: &mut Vec<String>,
-    parse_file: &mut dyn FnMut(&Path, &Path, &mut dyn FnMut(UsageRecord)) -> Result<(), String>,
-    known: &FileStates,
-) -> (u64, String, FileStates) {
-    scan_roots_incremental(
-        &[ScanRoot {
-            dir: dir.to_path_buf(),
-            label: None,
-        }],
-        config,
-        emit,
-        errors,
-        parse_file,
-        known,
-    )
 }
 
 /// Full multi-root scan (test-only convenience): walks every root and, when a

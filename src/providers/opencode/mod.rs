@@ -1,5 +1,8 @@
-//! OpenCode data source: reads the SQLite store at
-//! `~/.local/share/opencode/opencode.db`.
+//! OpenCode data source: reads the SQLite stores at
+//! `~/.local/share/opencode/opencode.db` and `opencode-stable.db` (all
+//! channels), plus the pre-1.2 legacy JSON messages under
+//! `storage/message/`. A message already migrated into SQLite and still
+//! present as JSON is deduped by message id (`INSERT OR IGNORE`).
 //!
 //! OpenCode (opencode.ai) keeps every session and its messages in a local
 //! SQLite database under the XDG data dir (`~/.local/share/opencode`; XDG
@@ -18,6 +21,7 @@ use std::time::Duration;
 use chrono::{TimeZone, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::core::model::{Provider, Usage};
 use crate::core::usage::UsageRecord;
@@ -29,6 +33,8 @@ use super::source::{
 
 /// SQLite store file name inside each data root.
 const DB_FILE: &str = "opencode.db";
+/// Alternate channel of the same store (all channels ship a sibling DB).
+const DB_FILE_ALT: &str = "opencode-stable.db";
 
 /// Minimal view of a `message` row's `data` JSON. Only the fields aggregated
 /// here are named; everything else — including full tool results and file
@@ -219,20 +225,99 @@ impl OpenCodeSource {
         ))
     }
 
-    /// Change-detection stats over one root's store files (`opencode.db` plus
-    /// its WAL sidecars when present). Shared by `scan` and `scan_fingerprint`
-    /// so the cheap check and a full scan always agree.
-    fn store_stats(root: &ScanRoot) -> (u64, i64, u64) {
+    /// Existing store files under a root (any version, incl. `opencode-stable.db`).
+    fn db_files(root: &ScanRoot) -> Vec<PathBuf> {
+        [DB_FILE, DB_FILE_ALT]
+            .iter()
+            .map(|f| root.dir.join(f))
+            .filter(|p| p.is_file())
+            .collect()
+    }
+
+    /// Legacy (pre-1.2) JSON message files under `root/storage/message/`.
+    fn legacy_json_files(root: &ScanRoot, max_file_size: u64) -> Vec<PathBuf> {
+        let dir = root.dir.join("storage").join("message");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut files = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
+            if meta.len() > max_file_size {
+                continue;
+            }
+            files.push(path);
+        }
+        files.sort();
+        files
+    }
+
+    /// Stream one assistant message from a legacy `storage/message/*.json` file.
+    /// Its dedup key reuses the SQLite store's key (`<label>/opencode.db:<id>`),
+    /// so a message already migrated into SQLite and still present as JSON is
+    /// inserted once (`INSERT OR IGNORE`).
+    fn scan_legacy_file(
+        path: &Path,
+        root: &ScanRoot,
+        emit: &mut dyn FnMut(UsageRecord),
+    ) -> Result<(), String> {
+        let content = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
+        let v: Value =
+            serde_json::from_str(&content).map_err(|e| format!("parse {path:?}: {e}"))?;
+        let id = v
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| path.file_stem().and_then(|s| s.to_str()).map(str::to_owned))
+            .unwrap_or_default();
+        let session_id = v
+            .get("sessionID")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if let Some(r) = Self::record_from_message(&id, &session_id, 0, &content, root) {
+            emit(r);
+        }
+        Ok(())
+    }
+
+    /// Change-detection stats over one root's store files (every channel DB plus
+    /// its WAL sidecars) and legacy JSON message files. Shared by `scan` and
+    /// `scan_fingerprint` so the cheap check and a full scan always agree.
+    fn store_stats(root: &ScanRoot, max_file_size: u64) -> (u64, i64, u64) {
         let mut found = 0u64;
         let mut max_mtime = 0i64;
         let mut total_bytes = 0u64;
-        let db = root.dir.join(DB_FILE);
-        for f in [
-            &db,
-            &db.with_extension("db-wal"),
-            &db.with_extension("db-shm"),
-        ] {
-            let Ok(meta) = std::fs::metadata(f) else {
+        for name in [DB_FILE, DB_FILE_ALT] {
+            let db = root.dir.join(name);
+            for f in [
+                &db,
+                &db.with_extension("db-wal"),
+                &db.with_extension("db-shm"),
+            ] {
+                let Ok(meta) = std::fs::metadata(f) else {
+                    continue;
+                };
+                found += 1;
+                total_bytes += meta.len();
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(unix) = modified.duration_since(std::time::UNIX_EPOCH) {
+                        max_mtime = max_mtime.max(unix.as_secs() as i64);
+                    }
+                }
+            }
+        }
+        for p in Self::legacy_json_files(root, max_file_size) {
+            let Ok(meta) = std::fs::metadata(&p) else {
                 continue;
             };
             found += 1;
@@ -271,20 +356,27 @@ impl ProviderSource for OpenCodeSource {
         let mut max_mtime = 0i64;
         let mut total_bytes = 0u64;
         for root in &roots {
-            let (found, mtime, bytes) = Self::store_stats(root);
+            let (found, mtime, bytes) = Self::store_stats(root, self.config.max_file_size);
             found_files += found;
             max_mtime = max_mtime.max(mtime);
             total_bytes += bytes;
 
-            let conn = match Self::open_db(&root.dir.join(DB_FILE)) {
-                Ok(c) => c,
-                Err(e) => {
+            for db in Self::db_files(root) {
+                let conn = match Self::open_db(&db) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        errors.push(e);
+                        continue;
+                    }
+                };
+                if let Err(e) = Self::scan_db(&conn, root, emit) {
                     errors.push(e);
-                    continue;
                 }
-            };
-            if let Err(e) = Self::scan_db(&conn, root, emit) {
-                errors.push(e);
+            }
+            for p in Self::legacy_json_files(root, self.config.max_file_size) {
+                if let Err(e) = Self::scan_legacy_file(&p, root, emit) {
+                    errors.push(e);
+                }
             }
         }
         Ok(ScanOutput {
@@ -304,7 +396,7 @@ impl ProviderSource for OpenCodeSource {
         let mut total_bytes = 0u64;
         let mut found = 0u64;
         for root in &roots {
-            let (f, m, b) = Self::store_stats(root);
+            let (f, m, b) = Self::store_stats(root, self.config.max_file_size);
             found += f;
             max_mtime = max_mtime.max(m);
             total_bytes += b;
@@ -354,6 +446,42 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    /// Write a store under an explicit filename (e.g. the alternate channel
+    /// `opencode-stable.db`).
+    fn write_store_named(dir: &Path, filename: &str, messages: &[(&str, &str, &str)]) {
+        let conn = Connection::open(dir.join(filename)).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER,
+                data TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        for (id, session_id, data) in messages {
+            conn.execute(
+                "INSERT INTO message (id, session_id, time_created, data)
+                 VALUES (?1, ?2, 1786800000000, ?3)",
+                params![id, session_id, data],
+            )
+            .unwrap();
+        }
+    }
+
+    /// Write a legacy `storage/message/<id>.json` file with top-level `id` and
+    /// `sessionID` plus the same `data` shape carried by a SQLite `message` row.
+    fn write_legacy_message(dir: &Path, content: &str) {
+        let msg_dir = dir.join("storage").join("message");
+        fs::create_dir_all(&msg_dir).unwrap();
+        let id = serde_json::from_str::<Value>(content)
+            .ok()
+            .and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_owned))
+            .unwrap_or_else(|| "anon".to_string());
+        fs::write(msg_dir.join(format!("{id}.json")), content).unwrap();
     }
 
     fn source_for(dir: &Path) -> OpenCodeSource {
@@ -509,5 +637,47 @@ mod tests {
             ],
         );
         assert_ne!(fp1, src.scan_fingerprint().unwrap());
+    }
+
+    #[test]
+    fn reads_alternate_store_channel() {
+        let dir = tempdir().unwrap();
+        write_store_named(
+            dir.path(),
+            DB_FILE_ALT,
+            &[("msg_1", "ses_1", &assistant_data("/p", 10, 5, 20))],
+        );
+
+        let (out, records) = scan_collect(&source_for(dir.path()));
+        assert!(out.errors.is_empty());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].usage.total_tokens(), 35);
+        // The alternate channel is counted as a found file.
+        assert_eq!(out.found_files, 1);
+    }
+
+    #[test]
+    fn dedups_legacy_json_against_sqlite_by_message_id() {
+        let dir = tempdir().unwrap();
+        // The same logical message lives in both the SQLite store and the
+        // legacy JSON dir (still present after a partial migration).
+        write_store(
+            dir.path(),
+            &[("msg_1", "ses_1", &assistant_data("/p", 1, 0, 0))],
+        );
+        let legacy = r#"{"id":"msg_1","sessionID":"ses_1","role":"assistant","path":{"cwd":"/p"},"tokens":{"input":1,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"modelID":"gpt-5.6","time":{"created":1,"completed":2}}"#;
+        write_legacy_message(dir.path(), legacy);
+
+        let (out, records) = scan_collect(&source_for(dir.path()));
+        assert!(out.errors.is_empty());
+        // The provider streams both sources; the storage-level
+        // `INSERT OR IGNORE` collapses them because they share a fingerprint.
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].fingerprint, "opencode.db:msg_1");
+        assert_eq!(records[0].fingerprint, records[1].fingerprint);
+        assert_eq!(
+            records[0].usage.total_tokens(),
+            records[1].usage.total_tokens()
+        );
     }
 }
