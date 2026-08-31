@@ -14,7 +14,12 @@
 //! `rawUsage.prompt_cache_miss_tokens`), so the fresh input is computed by
 //! subtracting `cache_read_input_tokens` — the same disjoint-bucket rule as
 //! the CodeBuddy adapter. Model comes from `providerData.model`, project from
-//! the last path component of `cwd`, and the session id from `sessionId`.
+//! `cwd` (see [`project_from_cwd`]), and the session id from `sessionId`.
+//!
+//! When `message.usage` / `providerData.usage` are absent, the OpenAI-style
+//! `providerData.rawUsage` object is used instead, and cache-write tokens are
+//! read from `prompt_cache_write_tokens` (or `cache_creation_input_tokens`) so
+//! the bucket never silently drops cached writes.
 
 use std::path::{Path, PathBuf};
 
@@ -53,9 +58,11 @@ struct Message {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProviderData {
     model: Option<String>,
     usage: Option<UsageLine>,
+    raw_usage: Option<RawUsage>,
 }
 
 /// Token counts with both spellings: newer sessions use camelCase keys under
@@ -69,6 +76,69 @@ struct UsageLine {
     output_tokens: Option<Value>,
     #[serde(alias = "cacheReadInputTokens")]
     cache_read_input_tokens: Option<Value>,
+}
+
+/// OpenAI-style usage carried in `providerData.rawUsage`. Note WorkBuddy writes
+/// `cache_read_input_tokens` here as 0 even when the prompt was cached — the
+/// real cached portion lives in `prompt_cache_hit_tokens`, so that is the field
+/// treated as cache-read (and `prompt_cache_miss_tokens` stays implicit as
+/// `prompt_tokens - prompt_cache_hit_tokens`).
+#[derive(Deserialize)]
+struct RawUsage {
+    prompt_tokens: Option<Value>,
+    completion_tokens: Option<Value>,
+    prompt_cache_hit_tokens: Option<Value>,
+    prompt_cache_write_tokens: Option<Value>,
+    cache_creation_input_tokens: Option<Value>,
+}
+
+impl RawUsage {
+    /// Cache-write tokens: `prompt_cache_write_tokens` when present, else
+    /// `cache_creation_input_tokens`. Either spelling appears across sessions.
+    fn cache_write(&self) -> Option<u64> {
+        self.prompt_cache_write_tokens
+            .as_ref()
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                self.cache_creation_input_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+            })
+    }
+}
+
+/// Map a WorkBuddy `cwd` to a stable project label. WorkBuddy launches each
+/// session inside a fresh `<home>\WorkBuddy\<timestamp>` workspace, so the
+/// trailing `YYYY-MM-DD-HH-MM-SS` segment is not a real project. When it is a
+/// launch timestamp, label the project after the workspace root (its parent
+/// directory); otherwise keep the real last path component (an actual repo).
+fn project_from_cwd(cwd: &str) -> String {
+    let path = Path::new(cwd);
+    let Some(leaf) = path.file_name().and_then(|n| n.to_str()) else {
+        return "unknown".to_string();
+    };
+    if is_workbuddy_timestamp(leaf) {
+        if let Some(workspace) = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+        {
+            return workspace.to_string();
+        }
+    }
+    leaf.to_string()
+}
+
+/// Whether `s` is a WorkBuddy launch-timestamp workspace folder
+/// (`YYYY-MM-DD-HH-MM-SS`), e.g. `2026-08-31-17-40-20`.
+fn is_workbuddy_timestamp(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 6
+        && parts[0].len() == 4
+        && parts[0].chars().all(|c| c.is_ascii_digit())
+        && parts[1..]
+            .iter()
+            .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 pub struct WorkbuddySource {
@@ -127,32 +197,60 @@ impl WorkbuddySource {
         }
 
         // Newer sessions put usage in `message.usage`, older ones in
-        // `providerData.usage`; fall back so both parse into one record per
-        // API request.
-        let usage = value
-            .message
+        // `providerData.usage`; some flows write only `providerData.rawUsage`.
+        // Prefer the normalized `message.usage` / `providerData.usage`, then
+        // fall back to rawUsage so every usage-bearing line becomes one record.
+        let message_usage = value.message.as_ref().and_then(|m| m.usage.as_ref());
+        let provider_usage = value.provider_data.as_ref().and_then(|p| p.usage.as_ref());
+        let raw_usage = value
+            .provider_data
             .as_ref()
-            .and_then(|m| m.usage.as_ref())
-            .or_else(|| value.provider_data.as_ref().and_then(|p| p.usage.as_ref()))?;
-        let input_tokens = usage
-            .input_tokens
-            .as_ref()
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let output_tokens = usage
-            .output_tokens
-            .as_ref()
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let cache_read_tokens = usage
-            .cache_read_input_tokens
-            .as_ref()
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
+            .and_then(|p| p.raw_usage.as_ref());
+        let (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) =
+            if let Some(usage) = message_usage.or(provider_usage) {
+                let input = usage
+                    .input_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let output = usage
+                    .output_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let cache_read = usage
+                    .cache_read_input_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                // Cache-write is only present in rawUsage; default to 0 here.
+                let cache_write = raw_usage.and_then(RawUsage::cache_write).unwrap_or(0);
+                (input, output, cache_read, cache_write)
+            } else if let Some(raw) = raw_usage {
+                let input = raw
+                    .prompt_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let output = raw
+                    .completion_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let cache_read = raw
+                    .prompt_cache_hit_tokens
+                    .as_ref()
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let cache_write = raw.cache_write().unwrap_or(0);
+                (input, output, cache_read, cache_write)
+            } else {
+                return None;
+            };
         // WorkBuddy's `input_tokens` includes the cached portion; keep TokenMonitor's
         // buckets disjoint so `total_tokens()` stays accurate.
         let fresh_input = input_tokens.saturating_sub(cache_read_tokens);
-        if fresh_input + cache_read_tokens + output_tokens == 0 {
+        if fresh_input + cache_read_tokens + output_tokens + cache_write_tokens == 0 {
             return None;
         }
 
@@ -170,8 +268,7 @@ impl WorkbuddySource {
         let project = value
             .cwd
             .as_deref()
-            .and_then(|cwd| Path::new(cwd).file_name())
-            .map(|n| n.to_string_lossy().into_owned())
+            .map(project_from_cwd)
             .unwrap_or_else(|| "unknown".to_string());
 
         Some(UsageRecord::new(
@@ -184,8 +281,8 @@ impl WorkbuddySource {
                 input_tokens: fresh_input,
                 output_tokens,
                 cache_read_tokens,
-                cache_write_tokens: 0, // WorkBuddy's usage has no cache-write field
-                cost_micros: 0,        // pricing applied in a later pipeline stage
+                cache_write_tokens,
+                cost_micros: 0, // pricing applied in a later pipeline stage
             },
             line.len() as u64,
             format!("{}:{line_idx}", rel.display()),
@@ -360,5 +457,151 @@ mod tests {
             err,
             ProviderError::DataDirNotFound(Provider::Workbuddy)
         ));
+    }
+
+    /// Mirrors the real WorkBuddy session found on this machine: six
+    /// `function_call` hops plus a final assistant `message`, each a separate
+    /// billed request, inside a launch-timestamp workspace. Asserts the
+    /// workspace-root project label and the aggregate token totals.
+    #[test]
+    fn parses_real_workbuddy_session_shape() {
+        use serde_json::json;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-real.jsonl");
+        let cwd = r"c:\Users\ZHY\WorkBuddy\2026-08-31-17-40-20";
+        let rows: [(u64, u64, u64); 7] = [
+            (26394, 289, 14464),
+            (26699, 74, 26368),
+            (37501, 305, 26688),
+            (52004, 4393, 37440),
+            (56440, 186, 51968),
+            (56675, 82, 56384),
+            (56852, 527, 56640),
+        ];
+        let mut lines = vec![json!({
+            "type": "message",
+            "role": "user",
+            "sessionId": "sess-r",
+            "cwd": cwd,
+            "content": [{"type": "input_text", "text": "hi"}],
+        })
+        .to_string()];
+        for (idx, (input, output, cache)) in rows.iter().enumerate() {
+            let last = idx == rows.len() - 1;
+            lines.push(
+                json!({
+                    "type": if last { "message" } else { "function_call" },
+                    "role": if last { "assistant" } else { "user" },
+                    "sessionId": "sess-r",
+                    "cwd": cwd,
+                    "providerData": {
+                        "model": "glm-5.3",
+                        "rawUsage": {
+                            "prompt_tokens": input,
+                            "completion_tokens": output,
+                            "prompt_cache_hit_tokens": cache,
+                            "prompt_cache_write_tokens": 0,
+                        },
+                    },
+                    "message": {
+                        "usage": {
+                            "input_tokens": input,
+                            "output_tokens": output,
+                            "cache_read_input_tokens": cache,
+                        },
+                    },
+                })
+                .to_string(),
+            );
+        }
+        fs::write(&path, lines.join("\n")).unwrap();
+
+        let (out, records) = scan_collect(&source_for(dir.path()));
+        assert_eq!(out.found_files, 1);
+        assert_eq!(records.len(), 7, "one record per billed request");
+        assert!(out.errors.is_empty());
+
+        let (mut input, mut cache, mut output, mut write, mut total) = (0, 0, 0, 0, 0);
+        for r in &records {
+            assert_eq!(r.project, "WorkBuddy");
+            assert_eq!(r.usage.model, "glm-5.3");
+            input += r.usage.input_tokens;
+            cache += r.usage.cache_read_tokens;
+            output += r.usage.output_tokens;
+            write += r.usage.cache_write_tokens;
+            total += r.usage.total_tokens();
+        }
+        assert_eq!(input, 312_565 - 269_952, "fresh input");
+        assert_eq!(cache, 269_952, "cache-read input");
+        assert_eq!(output, 5_856, "output");
+        assert_eq!(write, 0, "cache-write");
+        assert_eq!(total, 318_421, "total tokens");
+    }
+
+    /// A request whose only usage is `providerData.rawUsage` (no
+    /// `message.usage` / `providerData.usage`) still produces a record, and
+    /// cache-read is taken from `prompt_cache_hit_tokens` (the field WorkBuddy
+    /// actually fills) while cache-write comes from `prompt_cache_write_tokens`.
+    #[test]
+    fn falls_back_to_raw_usage_and_reads_cache_buckets() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-raw.jsonl");
+        fs::write(
+            &path,
+            r#"{"id":"m1","timestamp":1788169446546,"type":"function_call","name":"Write","sessionId":"s-raw","cwd":"c:\\Users\\ZHY\\WorkBuddy\\2026-08-31-17-40-20","providerData":{"model":"glm-5.3","rawUsage":{"prompt_tokens":56440,"completion_tokens":186,"prompt_cache_hit_tokens":51968,"prompt_cache_write_tokens":1200}}}
+"#,
+        )
+        .unwrap();
+
+        let (_, records) = scan_collect(&source_for(dir.path()));
+        assert_eq!(records.len(), 1);
+        let r = &records[0];
+        assert_eq!(r.usage.input_tokens, 56_440 - 51_968);
+        assert_eq!(r.usage.cache_read_tokens, 51_968);
+        assert_eq!(r.usage.cache_write_tokens, 1_200);
+        assert_eq!(r.usage.output_tokens, 186);
+        assert_eq!(r.usage.total_tokens(), 4_472 + 51_968 + 1_200 + 186);
+    }
+
+    /// When both `message.usage` and `rawUsage` are present (the common case),
+    /// input/output/cache-read come from `message.usage` but cache-write is
+    /// still read from `rawUsage.prompt_cache_write_tokens`.
+    #[test]
+    fn reads_cache_write_from_raw_usage_even_when_message_usage_present() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("session-both.jsonl");
+        fs::write(
+            &path,
+            r#"{"id":"m1","timestamp":1788169446546,"type":"function_call","sessionId":"s-b","cwd":"c:\\proj","providerData":{"model":"glm-5.3","rawUsage":{"prompt_tokens":56440,"completion_tokens":186,"prompt_cache_hit_tokens":51968,"prompt_cache_write_tokens":900}},"message":{"usage":{"input_tokens":56440,"output_tokens":186,"cache_read_input_tokens":51968}}}
+"#,
+        )
+        .unwrap();
+
+        let (_, records) = scan_collect(&source_for(dir.path()));
+        assert_eq!(records.len(), 1);
+        let r = &records[0];
+        assert_eq!(r.usage.input_tokens, 56_440 - 51_968);
+        assert_eq!(r.usage.cache_read_tokens, 51_968);
+        assert_eq!(r.usage.cache_write_tokens, 900);
+        assert_eq!(r.usage.output_tokens, 186);
+        assert_eq!(r.usage.total_tokens(), 4_472 + 51_968 + 900 + 186);
+    }
+
+    #[test]
+    fn project_labels_workspace_root_for_timestamp_and_last_segment_for_repo() {
+        // WorkBuddy launch workspace: label the stable workspace root instead of
+        // the volatile timestamp folder.
+        assert_eq!(
+            project_from_cwd(r"c:\Users\ZHY\WorkBuddy\2026-08-31-17-40-20"),
+            "WorkBuddy"
+        );
+        // A real repo path keeps its last component.
+        assert_eq!(project_from_cwd(r"c:\Users\ZHY\IdeaProjects\demo"), "demo");
+        assert_eq!(project_from_cwd(r"D:\src\TokenMonitor"), "TokenMonitor");
+        assert!(is_workbuddy_timestamp("2026-08-31-17-40-20"));
+        assert!(!is_workbuddy_timestamp("demo"));
+        assert!(!is_workbuddy_timestamp("2026-8-31-17-40-20"));
+        assert!(!is_workbuddy_timestamp("2026-08-31"));
     }
 }
