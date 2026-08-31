@@ -220,4 +220,19 @@ mod tests {
             .unwrap();
         assert_eq!(price.input, 2.0);
     }
+
+    #[test]
+    fn unknown_glm_falls_back_to_a_priced_model() {
+        // glm-5.3 isn't in the table; the FAMILY fallback must land on a priced
+        // GLM entry (z-ai/glm-5) instead of a missing key, so WorkBuddy's cost
+        // is never silently $0.
+        let price = pricer()
+            .resolve("glm-5.3", Provider::Workbuddy)
+            .expect("glm-5.3 must resolve to a priced model");
+        assert_eq!(price.input, 0.6); // z-ai/glm-5 in rate
+        assert!(
+            pricer().cost_micros(Provider::Workbuddy, "glm-5.3", 1_000, 100, 500, 0) > 0,
+            "unknown GLM versions must not cost zero"
+        );
+    }
 }

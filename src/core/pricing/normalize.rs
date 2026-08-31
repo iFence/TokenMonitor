@@ -10,7 +10,7 @@ pub(crate) const FAMILY: &[(&str, &str)] = &[
     ("gpt-5", "openai/gpt-5.5"),
     ("qwen", "qwen/qwen3.7-max"),
     ("deepseek", "deepseek/deepseek-v4-pro"),
-    ("glm", "z-ai/glm-5.2"),
+    ("glm", "z-ai/glm-5"),
     ("mimo", "xiaomi/mimo-v2.5-pro"),
     ("hy3", "tencent/hy3"),
 ];
