@@ -60,15 +60,11 @@ fn settings(weak: &WeakEntity<TokenMonitorApp>, panel_bg: Hsla) -> impl IntoElem
 /// "通用": app-wide behavior settings (rescan interval, accent theme color).
 fn general_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
     let weak = weak.clone();
-    SettingPage::new("通用")
-        .icon(IconName::Settings)
-        .description("应用整体行为设置")
-        .group(
-            SettingGroup::new()
-                .title("通用")
-                .item(SettingItem::new("扫描间隔", scan_interval_field(&weak)))
-                .item(SettingItem::new("主题色", theme_color_field(&weak))),
-        )
+    SettingPage::new("通用").icon(IconName::Settings).group(
+        SettingGroup::new()
+            .item(SettingItem::new("扫描间隔", scan_interval_field(&weak)))
+            .item(SettingItem::new("主题色", theme_color_field(&weak))),
+    )
 }
 
 /// Dropdown field reading/writing the live [`TokenMonitorApp::scan_interval`].
@@ -137,17 +133,32 @@ fn theme_color_field(weak: &WeakEntity<TokenMonitorApp>) -> SettingField<SharedS
     )
 }
 
-/// "关于": app name, version, description, and the auto-update controls.
+/// "关于": version row and the auto-update controls.
 fn about_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
-    let weak = weak.clone();
-    SettingPage::new("关于")
-        .icon(IconName::Info)
-        .group(SettingGroup::new().title("关于").item(about_item(&weak)))
+    SettingPage::new("关于").icon(IconName::Info).group(
+        SettingGroup::new()
+            .item(SettingItem::new("版本", version_field()))
+            .item(about_item(weak)),
+    )
 }
 
-/// The about content as a single custom element: name, version, and the update
-/// check / download controls. State is read live through the weak handle each
-/// render so the panel always reflects the latest `update_check`.
+/// Version read-only row: the label "版本" on the left and the prefixed version
+/// number (e.g. `v0.3.4`) on the right, matching a normal setting item.
+fn version_field() -> SettingField<SharedString> {
+    SettingField::render(|_, _, cx: &mut App| {
+        let p = crate::ui::palette(cx);
+        div()
+            .text_sm()
+            .text_color(p.foreground)
+            .child(format!("v{}", env!("CARGO_PKG_VERSION")))
+            .into_any_element()
+    })
+}
+
+/// The about update controls as a custom element: the check-updates button, its
+/// status, the download progress, release notes, and the download / skip
+/// actions. State is read live through the weak handle each render so the
+/// panel always reflects the latest `update_check`.
 fn about_item(weak: &WeakEntity<TokenMonitorApp>) -> SettingItem {
     let portable = crate::platform::is_portable();
     let weak = weak.clone();
@@ -273,14 +284,6 @@ fn about_item(weak: &WeakEntity<TokenMonitorApp>) -> SettingItem {
 
         v_flex()
             .gap_3()
-            .child(div().text_lg().font_bold().child("TokenMonitor"))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(p.muted_foreground)
-                    .child(format!("版本 {}", env!("CARGO_PKG_VERSION"))),
-            )
-            .child(h_flex().h_px().w_full().bg(p.border))
             .child(
                 h_flex()
                     .gap_2()

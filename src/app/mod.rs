@@ -22,6 +22,11 @@ pub fn run() -> anyhow::Result<()> {
     let application = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     application.run(move |cx: &mut App| {
         gpui_component::init(cx);
+        // The settings/search/select widgets pull their placeholder and tooltip
+        // text from gpui_component's rust_i18n bundles. Default to the zh-CN
+        // locale so the settings sidebar search box reads "搜索..." instead of
+        // the English "Search...".
+        gpui_component::set_locale("zh-CN");
         cx.on_action(|_: &Quit, cx| cx.quit());
         // GitHub release check + installer download go through this client.
         let http_client = reqwest_client::ReqwestClient::user_agent(concat!(
