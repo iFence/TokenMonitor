@@ -151,6 +151,17 @@ impl<'a> UsageRepo<'a> {
             .map_err(Into::into)
     }
 
+    /// Delete every row for one provider. Used by the CodeBuddy fingerprint
+    /// migration, where the dedup key scheme changes and stale rows must be
+    /// re-inserted with the new, stable ids.
+    pub fn delete_by_provider(&self, provider: Provider) -> Result<u64> {
+        let changed = self.conn.execute(
+            "DELETE FROM usage_records WHERE provider = ?1",
+            params![provider.id()],
+        )?;
+        Ok(changed as u64)
+    }
+
     pub fn query_by_window(&self, w: &TimeWindow) -> Result<Vec<UsageRecord>> {
         self.query_where(
             "started_at >= ?1 AND started_at < ?2",

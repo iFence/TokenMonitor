@@ -29,6 +29,12 @@ const SCAN_INTERVAL_KEY: &str = "scan.interval_seconds";
 /// Settings key holding the app accent theme color (a `ThemeColor` key).
 const THEME_COLOR_KEY: &str = "theme.color";
 
+/// Settings key + current value for the CodeBuddy fingerprint scheme. Bumping
+/// the value triggers a one-time rebuild of CodeBuddy rows so they land with the
+/// stable, request-id-based dedup keys instead of the old line-number keys.
+const CODEBUDDY_FINGERPRINT_VERSION_KEY: &str = "codebuddy.fingerprint.version";
+const CODEBUDDY_FINGERPRINT_VERSION: &str = "2";
+
 /// Default periodic rescan interval (5 minutes).
 pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 300;
 
@@ -64,6 +70,27 @@ impl Collector {
                 settings.set(PRICING_VERSION_KEY, PRICING_VERSION)?;
                 eprintln!(
                     "TokenMonitor: backfilled cost for {updated} usage rows (pricing v{PRICING_VERSION})"
+                );
+            }
+        }
+        // CodeBuddy fingerprint migration: the dedup key moved from a line index
+        // to the provider's stable request id, so stale rows must be rebuilt.
+        {
+            let settings = SettingsRepo::new(&conn);
+            if settings.get(CODEBUDDY_FINGERPRINT_VERSION_KEY)?
+                != Some(CODEBUDDY_FINGERPRINT_VERSION.to_string())
+            {
+                let deleted = UsageRepo::new(&conn).delete_by_provider(Provider::Codebuddy)?;
+                // Drop the source fingerprint + per-file state so the next scan
+                // re-reads and re-inserts with the new dedup keys.
+                settings.remove(&format!("scan.fingerprint.{}", Provider::Codebuddy.id()))?;
+                settings.remove(&format!("scan.files.{}", Provider::Codebuddy.id()))?;
+                settings.set(
+                    CODEBUDDY_FINGERPRINT_VERSION_KEY,
+                    CODEBUDDY_FINGERPRINT_VERSION,
+                )?;
+                eprintln!(
+                    "TokenMonitor: rebuilt {deleted} CodeBuddy rows (fingerprint v{CODEBUDDY_FINGERPRINT_VERSION})"
                 );
             }
         }
