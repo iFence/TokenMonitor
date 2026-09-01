@@ -2,7 +2,7 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, size, AnyElement, App, Context, ElementId, InteractiveElement, IntoElement,
+    div, px, size, svg, AnyElement, App, Context, ElementId, InteractiveElement, IntoElement,
     ParentElement, StatefulInteractiveElement, Styled, WeakEntity,
 };
 use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
@@ -41,11 +41,17 @@ pub fn provider_card(
                 .items_center()
                 .justify_between()
                 .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .text_color(p.foreground)
-                        .child(provider.display_name()),
+                    h_flex()
+                        .items_center()
+                        .gap_2()
+                        .child(provider_logo(cx, provider))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(p.foreground)
+                                .child(provider.display_name()),
+                        ),
                 )
                 .when(has_usage, |this| {
                     this.child(
@@ -116,6 +122,55 @@ pub fn provider_card(
             this.child(model_section(cx, weak, provider, models, expanded))
         })
         .into_any_element()
+}
+
+/// 16px provider logo rendered before the card name. Each SVG is embedded at
+/// compile time and drawn in the theme's foreground color (`currentColor`);
+/// hardcoded fills (e.g. `#fff` on some brand assets) are remapped so logos
+/// stay visible on both light and dark themes. Falls back to an empty spacer
+/// when a tool has no bundled asset, keeping card headers aligned.
+fn provider_logo(cx: &Context<TokenMonitorApp>, provider: Provider) -> AnyElement {
+    let p = crate::ui::palette(cx);
+    match provider_icon_bytes(provider) {
+        Some(bytes) => {
+            let mono = mono_svg(std::str::from_utf8(bytes).unwrap_or(""));
+            svg()
+                .data(mono.as_bytes())
+                .w(px(16.0))
+                .h(px(16.0))
+                .text_color(p.foreground)
+                .into_any_element()
+        }
+        None => div().w(px(16.0)).h(px(16.0)).into_any_element(),
+    }
+}
+
+/// Raw SVG bytes for a provider's logo, or `None` when no asset is bundled.
+fn provider_icon_bytes(provider: Provider) -> Option<&'static [u8]> {
+    match provider.id() {
+        "claude" => Some(include_bytes!("../../../assets/icons/claude.svg")),
+        "codex" => Some(include_bytes!("../../../assets/icons/codex.svg")),
+        "gemini" => Some(include_bytes!("../../../assets/icons/gemini.svg")),
+        "antigravity" => Some(include_bytes!("../../../assets/icons/antigravity.svg")),
+        "codebuddy" => Some(include_bytes!("../../../assets/icons/codebuddy.svg")),
+        "workbuddy" => Some(include_bytes!("../../../assets/icons/workbuddy.svg")),
+        "opencode" => Some(include_bytes!("../../../assets/icons/opencode.svg")),
+        "qoder" => Some(include_bytes!("../../../assets/icons/qoder.svg")),
+        "openclaw" => Some(include_bytes!("../../../assets/icons/openclaw.svg")),
+        "deepseek" => Some(include_bytes!("../../../assets/icons/deepseek.svg")),
+        "pi" => Some(include_bytes!("../../../assets/icons/pi.svg")),
+        "trae" => Some(include_bytes!("../../../assets/icons/trae.svg")),
+        _ => None,
+    }
+}
+
+/// Force an SVG to a single themeable fill: remap hardcoded brand fills (e.g.
+/// `#fff` on some assets) to `currentColor` so `gpui::svg().data(...)` paints
+/// the logo in the theme's foreground color instead of a fixed white/black.
+fn mono_svg(raw: &str) -> String {
+    raw.replace("#ffffff", "currentColor")
+        .replace("#fff", "currentColor")
+        .replace("white", "currentColor")
 }
 
 /// Small donut ring showing cache-read share of (input + cache_read), with a
@@ -258,4 +313,41 @@ fn model_section(
                     .into_any_element()
             }))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_tracked_provider_has_a_bundled_logo() {
+        for provider in Provider::ALL {
+            assert!(
+                provider_icon_bytes(provider).is_some(),
+                "missing logo for {}",
+                provider.id()
+            );
+        }
+    }
+
+    #[test]
+    fn mono_svg_remaps_hardcoded_fills_to_current_color() {
+        assert_eq!(
+            mono_svg(r##"<path fill="#fff"/>"##),
+            r##"<path fill="currentColor"/>"##
+        );
+        assert_eq!(
+            mono_svg(r##"<path fill="#ffffff"/>"##),
+            r##"<path fill="currentColor"/>"##
+        );
+        assert_eq!(
+            mono_svg(r##"<path fill="white"/>"##),
+            r##"<path fill="currentColor"/>"##
+        );
+        // Already-themeable fills are left untouched.
+        assert_eq!(
+            mono_svg(r##"<path fill="currentColor"/>"##),
+            r##"<path fill="currentColor"/>"##
+        );
+    }
 }
