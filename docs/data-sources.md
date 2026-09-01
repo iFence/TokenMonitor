@@ -19,6 +19,7 @@
 | Antigravity | `~/.gemini/antigravity-cli/conversations/*.db` + `antigravity-ide` | CLI / IDE 双 DB | 已同时读 CLI 与 IDE，无改动 |
 | Gemini | 原为 stub（`~/.gemini`，不解析） | `$GEMINI_CLI_HOME/tmp/*/chats/*.json`（回退 `~/.gemini/tmp/*/chats/*.json`） | 重写为真实 reader：解析 `usageMetadata`（输入/输出/缓存），未知 schema 静默跳过 |
 | Qoder | 原为 stub（`~/.qoder`，不解析） | Qoder CN 本地 SQLite `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`（及 macOS/Linux，可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖） | 改为正确路径 + OpenCode 式 `message.data` 解析（best-effort，schema 不符则静默为空） |
+| Trae | tokscale 同步缓存 `%APPDATA%\tokscale\trae-cache\sessions\*.json`（macOS/Linux 为 `~/.config/tokscale/...`，可用 `TOKSCALE_CONFIG_DIR` 覆盖） | tok scale 同样读取 `trae-cache/sessions/*.json` | 新增：Trae 本地用量 DB 加密，token 计数取自 tokscale 同步缓存；需先执行 `tokscale trae login` + `tokscale trae sync`，否则无数据（不报错） |
 
 ## 去重约定
 

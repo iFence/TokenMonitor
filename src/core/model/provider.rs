@@ -20,6 +20,7 @@ pub enum Provider {
     OpenClaw,
     DeepSeek,
     Pi,
+    Trae,
 }
 
 impl std::fmt::Display for Provider {
@@ -29,7 +30,7 @@ impl std::fmt::Display for Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 11] = [
+    pub const ALL: [Provider; 12] = [
         Provider::Claude,
         Provider::Codex,
         Provider::Gemini,
@@ -41,6 +42,7 @@ impl Provider {
         Provider::OpenClaw,
         Provider::DeepSeek,
         Provider::Pi,
+        Provider::Trae,
     ];
 
     /// Stable lowercase identifier, used as the DB provider column and serde tag.
@@ -57,6 +59,7 @@ impl Provider {
             Provider::OpenClaw => "openclaw",
             Provider::DeepSeek => "deepseek",
             Provider::Pi => "pi",
+            Provider::Trae => "trae",
         }
     }
 
@@ -73,6 +76,7 @@ impl Provider {
             Provider::OpenClaw => "OpenClaw",
             Provider::DeepSeek => "DeepSeek Harness",
             Provider::Pi => "Pi",
+            Provider::Trae => "Trae",
         }
     }
 
