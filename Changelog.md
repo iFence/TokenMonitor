@@ -7,6 +7,18 @@
 - 标题下方直接填写会展示在应用更新弹窗中的 Markdown 内容
 - 使用 `---` 或下一个版本标题结束当前版本说明
 
+## v0.3.4
+
+### ✨ 新增功能
+- **Trae 用量统计**：Trae 本地用量数据库加密、无法直接读取，改为解析 tokscale 同步缓存 `%APPDATA%\tokscale\trae-cache\sessions\*.json`（macOS/Linux 为 `~/.config/tokscale/...`，可用 `TOKSCALE_CONFIG_DIR` 覆盖）中的会话级 Token 用量，纳入输入/输出/缓存读写统计；模型名归一化为 tiktoken 风格 id 以便下游定价。需先执行 `tokscale trae login` + `tokscale trae sync`，否则无数据（不报错）。
+- **CodeBuddy IDE / 桌面端用量统计**：解析 IDE 扩展存储的会话索引（`%LOCALAPPDATA%\CodeBuddyExtension\Data\...\index.json`）中每个请求的 `usage`，从 `codebuddy-sessions.vscdb` 还原工作区路径，并按请求 id 关联模型，补齐此前仅统计 CLI 会话的空缺。
+
+### 🚀 优化改进
+- **CodeBuddy 稳定去重键**：去重键由行号改为 provider 稳定的请求 id，历史行会在下次扫描时自动重建，避免升级后重复统计。
+- **仪表盘应用卡片图标**：每张应用卡片名称旁新增 16px 品牌 logo（内置 SVG），随主题前景色染色，保证明暗主题下清晰可见。
+
+---
+
 ## v0.3.3
 
 ### ✨ 新增功能
