@@ -8,8 +8,8 @@ use std::sync::atomic::Ordering;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, px, AnyElement, App, Context, Hsla, IntoElement, ParentElement, SharedString,
-    StyleRefinement, Styled, WeakEntity, Window,
+    div, px, AnyElement, App, Context, Hsla, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
@@ -221,9 +221,10 @@ fn about_item(weak: &WeakEntity<TokenMonitorApp>) -> SettingItem {
             UpdateState::Available { release_notes, .. } if !release_notes.trim().is_empty() => {
                 Some(
                     div()
+                        .id("about-release-notes-scroll")
                         .w_full()
                         .max_h(px(220.0))
-                        .overflow_y_hidden()
+                        .overflow_y_scroll()
                         .rounded(p.radius)
                         .border_1()
                         .border_color(p.border)
