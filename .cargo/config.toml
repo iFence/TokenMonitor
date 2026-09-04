@@ -3,3 +3,16 @@ replace-with = "tuna"
 
 [source.tuna]
 registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"
+
+[target.x86_64-pc-windows-msvc]
+# Statically link the MSVC CRT (/MT: libcmt + static libucrt) so the produced
+# executables (tokenmonitor-app.exe, tokenmonitor-tui.exe) no longer depend on
+# the Visual C++ 2015-2022 Redistributable. With the default dynamic CRT (/MD)
+# the binaries require vcruntime140.dll / vcruntime140_1.dll / msvcp140.dll,
+# so they fail to start on machines without that redistributable with
+# "由于找不到 VCRUNTIME140_1.dll，无法继续执行代码".
+#
+# This is the Windows counterpart of the static-musl Linux build in
+# .github/workflows/release.yml; both produce self-contained binaries that run
+# on clean machines / distros without requiring a separately installed runtime.
+rustflags = ["-C", "target-feature=+crt-static"]
