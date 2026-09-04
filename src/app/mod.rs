@@ -52,6 +52,16 @@ pub fn run() -> anyhow::Result<()> {
             move |window, cx| {
                 let view = cx.new(|cx| TokenMonitorApp::new(window, cx));
                 view.update(cx, |app, cx| app.maybe_check_for_updates_on_startup(cx));
+                // Windows system-tray icon: left-click shows the window,
+                // right-click opens a menu (打开 / 退出), and the title-bar X
+                // hides it to tray (quit via the tray menu). The window exists
+                // here, so we grab its native HWND and attach the icon.
+                #[cfg(target_os = "windows")]
+                if let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(&*window) {
+                    if let raw_window_handle::RawWindowHandle::Win32(win) = handle.as_raw() {
+                        crate::platform::start_tray(win.hwnd.get());
+                    }
+                }
                 cx.new(|cx| Root::new(view, window, cx).bordered(false))
             },
         )

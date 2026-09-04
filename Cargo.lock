@@ -7029,6 +7029,7 @@ dependencies = [
  "mimalloc",
  "notify",
  "ratatui",
+ "raw-window-handle",
  "reqwest_client",
  "rusqlite",
  "semver",

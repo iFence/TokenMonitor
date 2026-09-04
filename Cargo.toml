@@ -57,6 +57,9 @@ dirs = "6"
 notify = "7"
 walkdir = "2"
 async-channel = "2.5"
+# Extracts the native window handle (HWND) from gpui's `Window`, used to attach
+# the Windows system-tray icon. Pulls the exact version already in Cargo.lock.
+raw-window-handle = "0.6"
 # Returns freed memory to the OS on Windows; keeps RSS from parking at the
 # allocator's high-water mark after scans / view refreshes.
 mimalloc = "0.1"
