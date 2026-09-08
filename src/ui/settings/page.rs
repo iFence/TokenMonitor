@@ -62,8 +62,27 @@ fn general_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
     let weak = weak.clone();
     SettingPage::new("通用").icon(IconName::Settings).group(
         SettingGroup::new()
+            .item(SettingItem::new("开机自启", autostart_field(&weak)))
             .item(SettingItem::new("扫描间隔", scan_interval_field(&weak)))
             .item(SettingItem::new("主题色", theme_color_field(&weak))),
+    )
+}
+
+/// Switch field reading/writing the OS auto-start registration. The value is
+/// cached on the app entity (kept in sync with the OS), so the switch reflects
+/// the actual launch-at-login state without spawning `reg.exe` on every render.
+fn autostart_field(weak: &WeakEntity<TokenMonitorApp>) -> SettingField<bool> {
+    let weak_read = weak.clone();
+    let weak_write = weak.clone();
+    SettingField::switch(
+        move |cx: &App| {
+            weak_read
+                .read_with(cx, |app, _| app.autostart_enabled)
+                .unwrap_or(false)
+        },
+        move |enabled, cx: &mut App| {
+            let _ = weak_write.update(cx, |this, cx| this.set_autostart(enabled, cx));
+        },
     )
 }
 

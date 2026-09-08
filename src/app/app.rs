@@ -54,6 +54,8 @@ pub struct TokenMonitorApp {
     pub scan_interval: Arc<AtomicU64>,
     /// App accent theme color, applied to dashboard highlights and chart colors.
     pub theme_color: ThemeColor,
+    /// Whether the app is registered to launch at login (OS auto-start).
+    pub autostart_enabled: bool,
     /// Wakes the scheduler thread when the interval changes so the new value
     /// takes effect immediately instead of after the old cycle elapses.
     scheduler_wake: std::sync::mpsc::Sender<()>,
@@ -75,6 +77,7 @@ impl TokenMonitorApp {
         let check_updates_on_startup = collector.check_updates_on_startup();
         let skipped_update_version = collector.skipped_update_version();
         let theme_color = collector.theme_color();
+        let autostart_enabled = crate::platform::autostart_enabled();
 
         // Stateful dropdown / date-picker entities live for the app's lifetime;
         // recreating them each render would reset open state on every notify.
@@ -120,6 +123,7 @@ impl TokenMonitorApp {
             scan_interval,
             scheduler_wake,
             theme_color,
+            autostart_enabled,
         };
         app.sync_chart_app_select(window, cx);
 
@@ -233,6 +237,17 @@ impl TokenMonitorApp {
         self.theme_color = color;
         if let Err(e) = self.collector.set_theme_color(color) {
             self.state.last_error = Some(format!("save theme color: {e}"));
+        }
+        cx.notify();
+    }
+
+    /// Toggle OS auto-start registration (Run key / XDG entry / LaunchAgent).
+    pub fn set_autostart(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        match crate::platform::set_autostart(enabled) {
+            Ok(()) => self.autostart_enabled = enabled,
+            Err(e) => {
+                self.state.last_error = Some(format!("set auto-start: {e}"));
+            }
         }
         cx.notify();
     }

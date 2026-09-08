@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+pub mod autostart;
+pub use autostart::{autostart_enabled, set_autostart};
+
 pub mod tray;
 
 #[link(name = "dwmapi")]
