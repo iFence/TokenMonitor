@@ -13,9 +13,15 @@ pub fn render_page(
     cx: &mut Context<TokenMonitorApp>,
 ) -> AnyElement {
     let p = crate::ui::palette(cx);
-    let rows = &app.state.by_project;
+    // Show projects by token usage, largest first.
+    let mut rows = app.state.by_project.clone();
+    rows.sort_by(|a, b| {
+        b.1.total_tokens()
+            .cmp(&a.1.total_tokens())
+            .then_with(|| a.0.cmp(&b.0))
+    });
 
-    page_shell(cx, "项目", Some("按代码项目分组的 Token 用量"))
+    page_shell(cx, "项目", None)
         .child(
             v_flex()
                 .rounded(p.radius)
