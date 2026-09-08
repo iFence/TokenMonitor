@@ -27,7 +27,7 @@ pub fn render_topbar(
         ScanStatus::Idle => "尚未扫描".to_string(),
         ScanStatus::Scanning { .. } => "扫描中…".to_string(),
         ScanStatus::Done { at, .. } => {
-            format!("更新 {}", at.with_timezone(&east8()).format("%H:%M:%S"))
+            format!("更新 {}", at.with_timezone(&east8()).format("%H:%M"))
         }
         ScanStatus::Failed { .. } => "扫描失败".to_string(),
     };
