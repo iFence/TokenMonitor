@@ -162,7 +162,7 @@ fn about_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
 }
 
 /// Version read-only row: the label "版本" on the left and the prefixed version
-/// number (e.g. `v0.3.4`) on the right, matching a normal setting item.
+/// number (e.g. `v0.3.5`) on the right, matching a normal setting item.
 fn version_field() -> SettingField<SharedString> {
     SettingField::render(|_, _, cx: &mut App| {
         let p = crate::ui::palette(cx);
