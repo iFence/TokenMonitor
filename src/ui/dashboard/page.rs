@@ -1,12 +1,12 @@
 //! Dashboard page: time-range tabs, the report section (summary + heatmap) on
 //! top, and the auto-discovered agent usage cards below.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
+    div, px, AnyElement, Context, ElementId, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, Window,
 };
-use gpui_component::tab::{Tab, TabBar};
-use gpui_component::{h_flex, v_flex, StyledExt};
+use gpui_component::{h_flex, v_flex, ActiveTheme, StyledExt};
 
 use crate::app::app::TokenMonitorApp;
 use crate::app::state::TimeTab;
@@ -48,17 +48,17 @@ fn content(app: &mut TokenMonitorApp, cx: &mut Context<TokenMonitorApp>) -> AnyE
 
 /// Segmented time-range tab bar (今日/昨日/本周/上周/本月/本年).
 ///
-/// Rendered through gpui-component's `TabBar`: it assigns each `Tab` a distinct
-/// per-index element id (`ix`) and a `TabList`/`Tab` role, so every tab gets a
-/// unique a11y node id. Bare `Tab::new()` children would all default to
-/// `ix == 0` and collide with the same a11y node id.
+/// A custom control, because the gpui-component segmented `TabBar` pins every
+/// tab to its content width; here each tab flexes so the six ranges split the
+/// panel width evenly. Each tab gets a per-index element id for a unique a11y
+/// node, and the selected one is drawn as a raised pill on the track.
 fn tab_bar(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> impl IntoElement {
     let p = crate::ui::palette(cx);
     let weak = app.weak_self.clone();
-    let selected_ix = TimeTab::ALL
-        .iter()
-        .position(|tab| *tab == app.state.time_tab)
-        .unwrap_or(0);
+    let track = cx.theme().tokens.tab_bar_segmented;
+    let selected_bg = p.background;
+    let selected_fg = p.foreground;
+    let unselected_fg = p.muted_foreground;
 
     h_flex()
         .w_full()
@@ -68,15 +68,35 @@ fn tab_bar(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> impl IntoEle
         .border_b_1()
         .border_color(p.border)
         .child(
-            TabBar::new("dashboard-time-tabs")
-                .segmented()
-                .selected_index(selected_ix)
-                .children(TimeTab::ALL.iter().map(|tab| Tab::new().label(tab.label())))
-                .on_click(move |ix, _, cx| {
-                    if let Some(tab) = TimeTab::ALL.get(*ix) {
-                        let _ = weak.update(cx, |this, cx| this.select_time_tab(*tab, cx));
-                    }
-                }),
+            h_flex()
+                .w_full()
+                .gap(px(2.0))
+                .p(px(4.0))
+                .rounded(p.radius)
+                .bg(track)
+                .children(TimeTab::ALL.iter().enumerate().map(|(ix, tab)| {
+                    let tab = *tab;
+                    let selected = app.state.time_tab == tab;
+                    let weak = weak.clone();
+                    div()
+                        .id(ElementId::Name(format!("time-tab-{ix}").into()))
+                        .flex_1()
+                        .h(px(28.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_sm()
+                        .text_color(if selected { selected_fg } else { unselected_fg })
+                        .when(selected, move |this| this.bg(selected_bg).shadow_sm())
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.select_time_tab(tab, cx);
+                            });
+                        })
+                        .child(tab.label())
+                })),
         )
 }
 
