@@ -8,7 +8,9 @@
 
 use anyhow::{bail, Context, Result};
 
-const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+/// Full per-user run key. `reg.exe` rejects a key without its hive root
+/// (`HKCU\`), which would make every query/set fail silently.
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "TokenMonitor";
 
 /// Whether a `Run` value named `TokenMonitor` currently exists.

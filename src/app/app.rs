@@ -615,6 +615,12 @@ impl Render for TokenMonitorApp {
             // near-black, so lift them to the card/main background.
             theme.tokens.tab_bar_segmented = ui::hsla_from_hex(0x262b33).into();
             theme.tokens.background = ui::hsla_from_hex(0x1b1e24).into();
+            // Switch (开机自启) tokens: the unchecked track and the thumb are
+            // pulled straight from the stale gpui-component defaults otherwise,
+            // which look off against the lifted slate panel. Keep them in the
+            // palette; the checked track is set from the accent below.
+            theme.tokens.switch = ui::hsla_from_hex(0x2f3540).into();
+            theme.tokens.switch_thumb = ui::hsla_from_hex(0xd8dbe0).into();
 
             // Apply the user's accent theme color to the primary/button/chart
             // surfaces so the dashboard highlights, primary buttons, and chart
@@ -630,6 +636,7 @@ impl Render for TokenMonitorApp {
             theme.ring = accent;
             theme.blue = accent;
             theme.blue_light = accent.lighten(0.2);
+            theme.tokens.primary = accent.into();
             theme.chart_1 = c1;
             theme.chart_2 = c2;
             theme.chart_3 = c3;
