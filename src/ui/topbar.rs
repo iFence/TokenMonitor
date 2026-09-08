@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, IconName, Selectable,
+    h_flex, IconName, Selectable, StyledExt,
 };
 
 use crate::app::app::TokenMonitorApp;
@@ -40,7 +40,15 @@ pub fn render_topbar(
         .items_center()
         .border_b_1()
         .border_color(p.border)
-        .child(app_icon())
+        .child(
+            h_flex().gap_2().items_center().child(app_icon()).child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .text_color(p.foreground)
+                    .child("TokenMonitor"),
+            ),
+        )
         .child(
             div()
                 .flex_1()
@@ -84,7 +92,8 @@ pub fn render_topbar(
                     "nav-settings",
                     IconName::Settings,
                     ActivePage::Settings,
-                )),
+                ))
+                .child(close_button(cx)),
         )
         .into_any_element()
 }
@@ -98,9 +107,18 @@ fn app_icon() -> AnyElement {
         include_bytes!("../../resources/tokenmonitor.png").to_vec(),
     ));
     img(ImageSource::Image(image))
-        .w(px(18.0))
-        .h(px(18.0))
+        .w(px(22.0))
+        .h(px(22.0))
         .into_any_element()
+}
+
+/// Window close (X) sitting just left of the settings icon. Closes the window
+/// to the system tray on Windows (no-op elsewhere).
+fn close_button(cx: &mut Context<TokenMonitorApp>) -> Button {
+    Button::new("window-close")
+        .ghost()
+        .icon(IconName::Close)
+        .on_click(cx.listener(|_, _, _, _| crate::platform::close_window()))
 }
 
 fn nav_icon(

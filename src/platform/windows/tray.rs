@@ -132,6 +132,18 @@ pub fn start_tray(main_hwnd: isize) {
     }
 }
 
+/// Hide the main window to the system tray (close-to-tray). Equivalent to the
+/// title-bar X, which the subclassed window proc converts into `ShowWindow(SW_HIDE)`
+/// unless a quit was requested (see the tray menu's 退出).
+pub fn close_window() {
+    let Some(&hwnd) = MAIN_HWND.get() else {
+        return;
+    };
+    unsafe {
+        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    }
+}
+
 unsafe fn add_tray_icon() {
     let Some(&hwnd) = MAIN_HWND.get() else {
         return;

@@ -3,6 +3,8 @@
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::tray::close_window;
 /// Install the Windows system-tray icon for the main window (no-op on other
 /// platforms, where the symbol does not exist).
 #[cfg(target_os = "windows")]

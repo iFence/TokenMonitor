@@ -59,3 +59,52 @@ pub fn launch_installer(path: &Path) -> Result<()> {
 /// No native titlebar on the terminal frontend; no-op to keep the trait
 /// surface uniform across platforms.
 pub fn apply_dark_titlebar() {}
+
+/// No system tray on the Linux TUI frontend; no-op to keep the surface
+/// uniform across platforms.
+pub fn close_window() {}
+
+/// Path of the XDG autostart `.desktop` entry, if a home directory is known.
+fn autostart_desktop_path() -> Option<PathBuf> {
+    Some(
+        dirs::home_dir()?
+            .join(".config")
+            .join("autostart")
+            .join("tokenmonitor.desktop"),
+    )
+}
+
+/// Whether the XDG autostart desktop entry exists.
+pub fn autostart_enabled() -> bool {
+    autostart_desktop_path().is_some_and(|path| path.is_file())
+}
+
+/// Enable or disable auto-start by writing / removing the XDG autostart entry.
+pub fn set_autostart(enabled: bool) -> Result<()> {
+    let Some(path) = autostart_desktop_path() else {
+        // No home directory; nothing to register, and nothing to remove.
+        return Ok(());
+    };
+    if !enabled {
+        if path.is_file() {
+            std::fs::remove_file(&path).context("remove autostart desktop entry")?;
+        }
+        return Ok(());
+    }
+
+    let exe = std::env::current_exe().context("resolve current exe")?;
+    let desktop = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=TokenMonitor\n\
+         Exec=\"{}\"\n\
+         Comment=AI 编程工具 Token 用量追踪\n\
+         X-GNOME-Autostart-enabled=true\n",
+        exe.display()
+    );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create autostart directory")?;
+    }
+    std::fs::write(&path, desktop).context("write autostart desktop entry")?;
+    Ok(())
+}
