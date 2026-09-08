@@ -1,11 +1,14 @@
 //! Persistent top bar: app title, scan status, and page navigation.
 
+use std::sync::Arc;
+
 use gpui::{
-    div, AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Styled, Window,
+    div, img, px, AnyElement, Context, Image, ImageFormat, ImageSource, InteractiveElement,
+    IntoElement, ParentElement, Styled, Window, WindowControlArea,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, IconName, Selectable, StyledExt,
+    h_flex, IconName, Selectable,
 };
 
 use crate::app::app::TokenMonitorApp;
@@ -35,17 +38,14 @@ pub fn render_topbar(
         .px_4()
         .py_2()
         .items_center()
-        .justify_between()
         .border_b_1()
         .border_color(p.border)
+        .child(app_icon())
         .child(
-            v_flex().child(
-                div()
-                    .text_lg()
-                    .font_bold()
-                    .text_color(p.foreground)
-                    .child("TokenMonitor"),
-            ),
+            div()
+                .flex_1()
+                .self_stretch()
+                .window_control_area(WindowControlArea::Drag),
         )
         .child(
             h_flex()
@@ -86,6 +86,20 @@ pub fn render_topbar(
                     ActivePage::Settings,
                 )),
         )
+        .into_any_element()
+}
+
+/// Small app logo pinned to the top-left corner of the top bar. The bitmap
+/// (orange ring + orange "T") is embedded at compile time so it ships inside
+/// the binary, matching the window/taskbar icon in `resources/tokenmonitor.ico`.
+fn app_icon() -> AnyElement {
+    let image = Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!("../../resources/tokenmonitor.png").to_vec(),
+    ));
+    img(ImageSource::Image(image))
+        .w(px(18.0))
+        .h(px(18.0))
         .into_any_element()
 }
 

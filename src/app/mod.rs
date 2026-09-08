@@ -39,14 +39,15 @@ pub fn run() -> anyhow::Result<()> {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("TokenMonitor".into()),
-                    ..Default::default()
-                }),
-                // Measured from the running window (836x671 at scale factor
-                // 1.0). The report heatmap scales its cells to the card
-                // width, so this is a comfort floor, not a hard requirement.
-                window_min_size: Some(size(px(836.0), px(671.0))),
+                // Frameless window: the native title bar / control bar is
+                // removed, and the app's own top bar supplies the draggable
+                // region (see `WindowControlArea::Drag` in the top bar).
+                titlebar: None,
+                // The comfort floor is roughly two-thirds of the originally
+                // measured 836px width (scale factor 1.0). The report heatmap
+                // scales its cells to the card width, so this is a comfort
+                // floor, not a hard requirement.
+                window_min_size: Some(size(px(557.0), px(671.0))),
                 ..Default::default()
             },
             move |window, cx| {
