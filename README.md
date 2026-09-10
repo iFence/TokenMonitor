@@ -6,12 +6,21 @@
 </p>
 
 <p align="center">
-  ![release](https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square) ![downloads](https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square) ![license](https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square) ![MSRV](https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square) ![platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-blue?style=flat-square) ![stars](https://img.shields.io/github/stars/iFence/TokenMonitor?style=social)
+  <img src="https://img.shields.io/github/v/release/iFence/TokenMonitor?style=flat-square" alt="release">
+  <img src="https://img.shields.io/github/downloads/iFence/TokenMonitor/total?style=flat-square" alt="downloads">
+  <img src="https://img.shields.io/github/license/iFence/TokenMonitor?style=flat-square" alt="license">
+  <img src="https://img.shields.io/badge/MSRV-1.95-orange?style=flat-square" alt="MSRV">
+  <img src="https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-blue?style=flat-square" alt="platform">
+  <img src="https://img.shields.io/github/stars/iFence/TokenMonitor?style=social" alt="stars">
 </p>
 
 一个基于 **Rust** 的 AI 编程工具 **Token 用量追踪**应用，提供 GPUI 桌面版与 ratatui 终端版（TUI）两个前端。它读取本地各 AI 编程工具（Claude Code、Codex、Gemini CLI、Antigravity、CodeBuddy、WorkBuddy、OpenCode、OpenClaw、Qoder、DeepSeek Harness、Pi）的用量记录，存入 SQLite，并展示聚合后的用量、成本、配额与趋势图表。
 
 > 灵感与聚合/展示形式参考 [tokei](https://github.com/cclank/tokei)（按类别分组、排序、带合计的汇总表）。
+
+<p align="center">
+  <img src="resources/shortcut.png" alt="TokenMonitor 桌面版仪表盘" width="760">
+</p>
 
 ## 安装体积与内存占用（对比 Electron）
 
