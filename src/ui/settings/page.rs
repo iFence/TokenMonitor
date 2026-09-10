@@ -9,19 +9,17 @@ use std::sync::atomic::Ordering;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, px, Anchor, AnyElement, App, Context, Hsla, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity,
-    Window,
+    ParentElement, StatefulInteractiveElement, StyleRefinement, Styled, WeakEntity, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_component::setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings};
+use gpui_component::setting::{SettingGroup, SettingItem, SettingPage, Settings};
 use gpui_component::switch::Switch;
 use gpui_component::text::TextView;
 use gpui_component::{h_flex, v_flex, Disableable, IconName, StyledExt};
 
 use crate::app::app::TokenMonitorApp;
 use crate::app::state::ScanInterval;
-use crate::core::model::ThemeColor;
 use crate::core::update::UpdateState;
 
 use crate::ui::page_shell;
@@ -108,8 +106,7 @@ fn general_page(weak: &WeakEntity<TokenMonitorApp>) -> SettingPage {
     SettingPage::new("通用").icon(IconName::Settings).group(
         SettingGroup::new()
             .item(autostart_item(&weak))
-            .item(scan_interval_item(&weak))
-            .item(SettingItem::new("主题色", theme_color_field(&weak))),
+            .item(scan_interval_item(&weak)),
     )
 }
 
@@ -200,37 +197,6 @@ fn interval_dropdown(current: ScanInterval, weak: WeakEntity<TokenMonitorApp>) -
             })
         })
         .into_any_element()
-}
-
-/// Dropdown field reading/writing the app accent [`ThemeColor`]. The option
-/// value is the color's persisted key; the label is its display name. Reads go
-/// through the captured `WeakEntity` so the field reflects the current color.
-fn theme_color_field(weak: &WeakEntity<TokenMonitorApp>) -> SettingField<SharedString> {
-    let options = ThemeColor::ALL
-        .map(|color| {
-            (
-                SharedString::from(color.key()),
-                SharedString::from(color.label()),
-            )
-        })
-        .to_vec();
-    let weak_read = weak.clone();
-    let weak_write = weak.clone();
-    SettingField::scrollable_dropdown(
-        options,
-        move |cx: &App| {
-            let color = weak_read
-                .read_with(cx, |app, _| app.theme_color)
-                .unwrap_or_default();
-            SharedString::from(color.key())
-        },
-        move |value: SharedString, cx: &mut App| {
-            let color = ThemeColor::from_key(&value);
-            let _ = weak_write.update(cx, |this, cx| {
-                this.select_theme_color(color, cx);
-            });
-        },
-    )
 }
 
 /// "关于": version row and the auto-update controls.
