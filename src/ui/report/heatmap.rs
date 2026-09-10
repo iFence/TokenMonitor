@@ -43,8 +43,6 @@ const GAP: f32 = 3.0;
 const TOOLTIP_HEIGHT: f32 = 44.0;
 /// Gap between the tooltip and the cell it annotates.
 const TOOLTIP_GAP: f32 = 8.0;
-/// Left gutter reserved for the weekday labels.
-const GUTTER: f32 = 30.0;
 
 /// A day-keyed usage heatmap for the report page.
 #[derive(Debug, Clone, Default)]
@@ -121,7 +119,9 @@ impl ContributionHeatmap {
             .gap_1()
             .on_prepaint(move |bounds, window, cx| on_resize(bounds, window, cx))
             .child(month_row(start, today, cell, &p))
-            .child(h_flex().child(weekday_labels(cell, &p)).child(grid))
+            // No weekday gutter: the grid uses the full card width, which keeps
+            // the cells bigger when the panel is narrow.
+            .child(grid)
             .when_some(hover, |this, hover| {
                 let origin = measured.origin;
                 let width = measured.size.width.as_f32();
@@ -147,10 +147,10 @@ impl ContributionHeatmap {
     }
 }
 
-/// Square cell size (px) that packs `weeks` columns plus the weekday gutter
-/// into `available` width, clamped so cells stay usable at extreme sizes.
+/// Square cell size (px) that packs `weeks` columns into `available` width,
+/// clamped so cells stay usable at extreme sizes.
 fn cell_size(available: f32, weeks: usize) -> f32 {
-    let usable = available - GUTTER - weeks as f32 * GAP;
+    let usable = available - weeks as f32 * GAP;
     (usable / weeks as f32).clamp(CELL_MIN, CELL_MAX)
 }
 
@@ -260,30 +260,6 @@ fn tooltip(hover: &ReportHover, x: f32, y: f32, p: &crate::ui::Palette) -> impl 
         )
 }
 
-/// Weekday labels for the Sunday-first rows (Mon/Wed/Fri, like GitHub). The
-/// grid's first row is always a Sunday, so the Mon/Wed/Fri labels sit on the
-/// second/fourth/sixth rows (rows 1, 3, 5).
-fn weekday_labels(cell: f32, p: &crate::ui::Palette) -> impl IntoElement {
-    v_flex().gap(px(GAP)).children((0..ROWS).map(|row| {
-        let label = match row {
-            1 => "一",
-            3 => "三",
-            5 => "五",
-            _ => "",
-        };
-        div()
-            .w(px(GUTTER))
-            .h(px(cell))
-            .flex()
-            .items_center()
-            .justify_end()
-            .pr_1()
-            .text_xs()
-            .text_color(p.muted_foreground)
-            .child(label.to_string())
-    }))
-}
-
 /// Month labels above the grid columns; same fixed-width columns and gaps as
 /// the grid, so labels stay aligned as the heatmap scales.
 fn month_row(
@@ -295,7 +271,6 @@ fn month_row(
     let labels: HashMap<usize, String> = month_labels(start, today).into_iter().collect();
     h_flex()
         .gap(px(GAP))
-        .child(div().w(px(GUTTER)))
         .children((0..week_count(start, today)).map(|col| {
             v_flex().w(px(cell)).relative().h(px(16.0)).when_some(
                 labels.get(&col),
@@ -405,15 +380,12 @@ mod tests {
         }
     }
 
-    fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap()
-    }
-
     #[test]
     fn cell_size_fills_available_width_and_clamps() {
-        // A 772px card leaves exactly 11px cells for a 53-week grid:
-        // 772 = GUTTER + 53 * (11 + GAP).
-        assert_eq!(cell_size(772.0, 53), 11.0);
+        // A 742px card leaves exactly 11px cells for a 53-week grid:
+        // 742 = 53 * (11 + GAP). The grid spans the whole card width, with no
+        // weekday gutter eating into it.
+        assert_eq!(cell_size(742.0, 53), 11.0);
         assert_eq!(cell_size(10.0, 53), CELL_MIN);
         assert_eq!(cell_size(10_000.0, 53), CELL_MAX);
     }
@@ -424,7 +396,10 @@ mod tests {
         // code (e.g. `palette`) reads it.
         cx.update(|cx| gpui_component::init(cx));
 
-        let today = day(2026, 8, 19);
+        // The heatmap anchors its grid to the real current date, so the test
+        // must too: a hardcoded date only lines up with the hover coordinates
+        // until the calendar moves on.
+        let today = east8_local(Utc::now()).date_naive();
         let first_cell = grid_start(today);
         let events = Rc::new(RefCell::new(Vec::new()));
         let hover_bounds = Rc::new(RefCell::new(Bounds::default()));
@@ -469,11 +444,10 @@ mod tests {
                 m.size.width > px(0.0) && m.size.height > px(0.0),
                 "the heatmap should measure its card on the first frame"
             );
-            // The first column starts at the 30px weekday gutter and the grid
-            // sits below the 200px offset, the 16px month row and the 4px gap;
-            // (35, 225) lands inside the first cell once cells are sized from
-            // the measured width instead of the 4px minimum.
-            window.simulate_mouse_move(point(px(35.0), px(225.0)), cx);
+            // The grid starts at the card's left edge and sits below the 200px
+            // offset, the 16px month row and the 4px gap; (5, 225) lands inside
+            // the first (16px) cell.
+            window.simulate_mouse_move(point(px(5.0), px(225.0)), cx);
             window.draw(cx).clear(cx);
         })
         .unwrap();
