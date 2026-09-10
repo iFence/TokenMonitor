@@ -11,6 +11,8 @@ use gpui::{size, Style};
 pub struct DonutChart {
     data: Vec<(String, u64)>,
     colors: Vec<Hsla>,
+    /// Inner radius as a fraction of the outer one: the higher the value, the
+    /// thinner the band. A ring at 0.55 draws a 45%-thick band.
     inner_ratio: f32,
     size: Size<Pixels>,
     id: ElementId,
@@ -42,9 +44,23 @@ impl DonutChart {
         self
     }
 
+    /// How thin the ring is drawn: the inner radius as a fraction of the outer
+    /// one, clamped so a ring always keeps a visible band and an open hole.
+    pub fn inner_ratio(mut self, ratio: f32) -> Self {
+        self.inner_ratio = ratio.clamp(0.0, 0.95);
+        self
+    }
+
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
         self
+    }
+
+    /// Outer and inner radius of the ring drawn into a box `diameter` wide (the
+    /// ring always fits the smaller side of its bounds).
+    fn radii(&self, diameter: Pixels) -> (Pixels, Pixels) {
+        let outer = diameter / 2.0;
+        (outer, outer * self.inner_ratio)
     }
 }
 
@@ -123,8 +139,7 @@ impl Element for DonutChart {
             return;
         }
         let center = bounds.center();
-        let outer = bounds.size.width.min(bounds.size.height) / 2.0;
-        let inner = outer * self.inner_ratio;
+        let (outer, inner) = self.radii(bounds.size.width.min(bounds.size.height));
 
         let mut start_angle = -TAU / 4.0; // start at 12 o'clock
         for (i, (_, value)) in self.data.iter().enumerate() {
@@ -160,4 +175,39 @@ fn point_on_circle(center: Point<Pixels>, radius: Pixels, angle: f32) -> Point<P
         center.x + radius * angle.cos(),
         center.y + radius * angle.sin(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inner_ratio_is_clamped_to_a_drawable_ring() {
+        assert_eq!(DonutChart::new(vec![]).inner_ratio(0.9).inner_ratio, 0.9);
+        assert_eq!(DonutChart::new(vec![]).inner_ratio(-1.0).inner_ratio, 0.0);
+        assert_eq!(DonutChart::new(vec![]).inner_ratio(2.0).inner_ratio, 0.95);
+    }
+
+    /// The band is what the card ring is tuned by: `outer - inner` is the ring's
+    /// thickness, so the dashboard's 32px / 0.72 ring draws a 4.5px band where
+    /// the chart default (200px / 0.55) draws 45px.
+    #[test]
+    fn radii_follow_the_diameter_and_inner_ratio() {
+        let card_ring = DonutChart::new(vec![])
+            .with_size(size(px(32.0), px(32.0)))
+            .inner_ratio(0.72);
+        let (outer, inner) = card_ring.radii(px(32.0));
+        assert_eq!(outer, px(16.0));
+        // 16 * 0.72 lands a hair above 11.52 in f32, compare with a tolerance.
+        assert!((inner.as_f32() - 11.52).abs() < 0.01, "inner {inner}");
+        assert!(
+            ((outer - inner).as_f32() - 4.48).abs() < 0.01,
+            "band {}",
+            outer - inner
+        );
+
+        // A non-square box keeps the ring circular, sized by the shorter side.
+        let (outer, _) = DonutChart::new(vec![]).radii(px(30.0));
+        assert_eq!(outer, px(15.0));
+    }
 }

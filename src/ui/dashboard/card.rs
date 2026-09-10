@@ -173,6 +173,13 @@ fn mono_svg(raw: &str) -> String {
         .replace("white", "currentColor")
 }
 
+/// Diameter of the cache-hit ring on an app card. Kept small: it is a dial next
+/// to the percentage, not a chart in its own right.
+const CACHE_RING_SIZE: f32 = 32.0;
+/// Inner radius of that ring as a fraction of the outer one — 0.72 leaves a
+/// band about a third as thick as the donut chart's default (0.55).
+const CACHE_RING_INNER_RATIO: f32 = 0.72;
+
 /// Small donut ring showing cache-read share of (input + cache_read), with a
 /// side label, panel.png style. The hit arc uses the app's accent color;
 /// zero-usage cards get a grey placeholder ring.
@@ -211,7 +218,8 @@ fn cache_hit_ring(
         .child(
             DonutChart::new(data)
                 .colors(colors)
-                .with_size(size(px(48.0), px(48.0)))
+                .with_size(size(px(CACHE_RING_SIZE), px(CACHE_RING_SIZE)))
+                .inner_ratio(CACHE_RING_INNER_RATIO)
                 .id(ElementId::Name(
                     format!("cache-ring-{}", provider.id()).into(),
                 )),
@@ -348,6 +356,22 @@ mod tests {
         assert_eq!(
             mono_svg(r##"<path fill="currentColor"/>"##),
             r##"<path fill="currentColor"/>"##
+        );
+    }
+
+    /// The card ring is deliberately smaller and thinner than the charts-page
+    /// donut: 32px across with a ~4.5px band, where the old 48px / 0.55 default
+    /// drew a 10.8px band.
+    #[test]
+    fn cache_ring_stays_small_and_thin() {
+        let band = CACHE_RING_SIZE / 2.0 * (1.0 - CACHE_RING_INNER_RATIO);
+        assert!(
+            (band - 4.48).abs() < 0.01,
+            "the cache ring band should be ~4.5px, got {band}"
+        );
+        assert!(
+            CACHE_RING_SIZE <= 32.0,
+            "the cache ring should stay small, got {CACHE_RING_SIZE}px"
         );
     }
 }
