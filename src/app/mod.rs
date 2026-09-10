@@ -4,6 +4,7 @@ pub mod actions;
 pub mod app;
 pub mod state;
 pub mod update_check;
+pub mod window_state;
 
 pub use actions::Quit;
 pub use app::TokenMonitorApp;
@@ -14,7 +15,7 @@ pub use state::{
 
 use std::sync::Arc;
 
-use gpui::{px, size, App, AppContext, Bounds, WindowBounds, WindowOptions};
+use gpui::{px, size, App, AppContext, WindowBounds, WindowOptions};
 use gpui_component::Root;
 
 /// GPUI bootstrap: init components, open the main window, run the app.
@@ -42,7 +43,8 @@ pub fn run() -> anyhow::Result<()> {
         ))
         .expect("failed to initialize TokenMonitor HTTP client");
         cx.set_http_client(Arc::new(http_client));
-        let bounds = Bounds::centered(None, size(px(1100.0), px(800.0)), cx);
+        // Reopen at the size the window had when the app was last closed.
+        let bounds = window_state::initial_bounds(cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -53,13 +55,27 @@ pub fn run() -> anyhow::Result<()> {
                 // The comfort floor is roughly two-thirds of the originally
                 // measured 836px width (scale factor 1.0). The report heatmap
                 // scales its cells to the card width, so this is a comfort
-                // floor, not a hard requirement.
-                window_min_size: Some(size(px(557.0), px(671.0))),
+                // floor, not a hard requirement. Shared with the remembered
+                // window size, which is never restored below it.
+                window_min_size: Some(size(
+                    px(window_state::MIN_SIZE.0),
+                    px(window_state::MIN_SIZE.1),
+                )),
                 ..Default::default()
             },
             move |window, cx| {
                 let view = cx.new(|cx| TokenMonitorApp::new(window, cx));
                 view.update(cx, |app, cx| app.maybe_check_for_updates_on_startup(cx));
+                // Remember every resize so the next launch reopens at this
+                // size. Writes are coalesced off the UI thread.
+                view.update(cx, |app, cx| {
+                    let writer = window_state::start_writer(app.collector.clone());
+                    let mut watcher = window_state::SizeWatcher::new(writer);
+                    cx.observe_window_bounds(window, move |_app, window, _cx| {
+                        watcher.observe(window);
+                    })
+                    .detach();
+                });
                 // Windows system-tray icon: left-click shows the window,
                 // right-click opens a menu (打开 / 退出), and the title-bar X
                 // hides it to tray (quit via the tray menu). The window exists

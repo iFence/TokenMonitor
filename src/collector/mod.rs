@@ -210,6 +210,13 @@ impl Collector {
         SettingsRepo::new(&conn).set(THEME_COLOR_KEY, color.key())
     }
 
+    /// Persist the desktop window size (logical px) so the next launch can
+    /// reopen at it. Written from the window-size writer thread.
+    pub fn set_window_size(&self, width: f32, height: f32) -> Result<()> {
+        let conn = self.db.lock().expect("db lock poisoned");
+        SettingsRepo::new(&conn).set_window_size(width, height)
+    }
+
     /// The update version the user last chose to skip, if any.
     pub fn skipped_update_version(&self) -> Option<String> {
         let conn = self.db.lock().expect("db lock poisoned");
