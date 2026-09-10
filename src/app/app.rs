@@ -56,6 +56,9 @@ pub struct TokenMonitorApp {
     pub theme_color: ThemeColor,
     /// Whether the app is registered to launch at login (OS auto-start).
     pub autostart_enabled: bool,
+    /// Bumped on every auto-start write; a background result whose sequence is
+    /// stale lost the race to a newer toggle and is discarded.
+    autostart_seq: Arc<AtomicU64>,
     /// Wakes the scheduler thread when the interval changes so the new value
     /// takes effect immediately instead of after the old cycle elapses.
     scheduler_wake: std::sync::mpsc::Sender<()>,
@@ -77,7 +80,6 @@ impl TokenMonitorApp {
         let check_updates_on_startup = collector.check_updates_on_startup();
         let skipped_update_version = collector.skipped_update_version();
         let theme_color = collector.theme_color();
-        let autostart_enabled = crate::platform::autostart_enabled();
 
         // Stateful dropdown / date-picker entities live for the app's lifetime;
         // recreating them each render would reset open state on every notify.
@@ -123,7 +125,11 @@ impl TokenMonitorApp {
             scan_interval,
             scheduler_wake,
             theme_color,
-            autostart_enabled,
+            // Filled in by `refresh_autostart_enabled` right after construction:
+            // reading the registration spawns `reg.exe` on Windows, which must
+            // not run on the UI thread.
+            autostart_enabled: false,
+            autostart_seq: Arc::new(AtomicU64::new(0)),
         };
         app.sync_chart_app_select(window, cx);
 
@@ -191,6 +197,7 @@ impl TokenMonitorApp {
         }
 
         app.spawn_event_loop(cx);
+        app.refresh_autostart_enabled(cx);
         app.trigger_scan(cx); // initial auto-scan so data shows without manual action
         app.refresh_view(cx); // async: returns immediately, fills state in background
         app
@@ -242,14 +249,55 @@ impl TokenMonitorApp {
     }
 
     /// Toggle OS auto-start registration (Run key / XDG entry / LaunchAgent).
+    ///
+    /// On Windows the write shells out to `reg.exe`, which costs tens of
+    /// milliseconds — blocking the UI thread for that long is what made every
+    /// click on the switch hitch. The switch is updated up front and the OS
+    /// write is handed to the background executor; a failure reverts the
+    /// switch and reports the error instead.
     pub fn set_autostart(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        match crate::platform::set_autostart(enabled) {
-            Ok(()) => self.autostart_enabled = enabled,
-            Err(e) => {
-                self.state.last_error = Some(format!("set auto-start: {e}"));
-            }
-        }
+        self.autostart_enabled = enabled;
         cx.notify();
+
+        let seq = self.autostart_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let pending = self.autostart_seq.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { crate::platform::set_autostart(enabled) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // A toggle that landed while this write ran owns the switch now.
+                if pending.load(Ordering::SeqCst) != seq {
+                    return;
+                }
+                if let Err(e) = result {
+                    this.autostart_enabled = !enabled;
+                    this.state.last_error = Some(format!("set auto-start: {e}"));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Read the OS auto-start registration on the background executor and sync
+    /// the switch to whatever it finds.
+    fn refresh_autostart_enabled(&self, cx: &mut Context<Self>) {
+        let seq = self.autostart_seq.load(Ordering::SeqCst);
+        let pending = self.autostart_seq.clone();
+        cx.spawn(async move |this, cx| {
+            let enabled = cx
+                .background_spawn(async move { crate::platform::autostart_enabled() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if pending.load(Ordering::SeqCst) != seq {
+                    return; // superseded by a toggle; that one knows the truth
+                }
+                this.autostart_enabled = enabled;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Switch the dashboard time-range tab and re-query the window.

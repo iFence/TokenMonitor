@@ -6,6 +6,9 @@
 //! current executable and is rewritten whenever the toggle changes, so moving a
 //! portable build updates the launch target to the new location.
 
+use std::os::windows::process::CommandExt as _;
+use std::process::{Command, Stdio};
+
 use anyhow::{bail, Context, Result};
 
 /// Full per-user run key. `reg.exe` rejects a key without its hive root
@@ -13,15 +16,33 @@ use anyhow::{bail, Context, Result};
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "TokenMonitor";
 
+/// `reg.exe` is a console-subsystem program; TokenMonitor is a GUI-subsystem
+/// app, so spawning `reg.exe` without this flag makes Windows allocate a fresh
+/// console window that flashes on screen for every query and write.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A `reg.exe` invocation that never opens a console window and never reads
+/// stdin. stdout is discarded; stderr is captured for error reporting.
+fn reg<I, S>(args: I) -> Command
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut command = Command::new("reg.exe");
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
 /// Whether a `Run` value named `TokenMonitor` currently exists.
 pub fn autostart_enabled() -> bool {
-    std::process::Command::new("reg.exe")
-        .arg("query")
-        .arg(RUN_KEY)
-        .arg("/v")
-        .arg(VALUE_NAME)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+    let mut command = reg(["query", RUN_KEY, "/v", VALUE_NAME]);
+    command
+        .stderr(Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
@@ -32,18 +53,19 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
     if enabled {
         let exe = std::env::current_exe().context("resolve current exe")?;
         let value = format!("\"{}\"", exe.display());
-        let output = std::process::Command::new("reg.exe")
-            .arg("add")
-            .arg(RUN_KEY)
-            .arg("/v")
-            .arg(VALUE_NAME)
-            .arg("/t")
-            .arg("REG_SZ")
-            .arg("/d")
-            .arg(&value)
-            .arg("/f")
-            .output()
-            .context("run reg.exe to add auto-start")?;
+        let output = reg([
+            "add",
+            RUN_KEY,
+            "/v",
+            VALUE_NAME,
+            "/t",
+            "REG_SZ",
+            "/d",
+            value.as_str(),
+            "/f",
+        ])
+        .output()
+        .context("run reg.exe to add auto-start")?;
         if !output.status.success() {
             bail!(
                 "reg.exe add failed: {}",
@@ -55,12 +77,7 @@ pub fn set_autostart(enabled: bool) -> Result<()> {
         if !autostart_enabled() {
             return Ok(());
         }
-        let output = std::process::Command::new("reg.exe")
-            .arg("delete")
-            .arg(RUN_KEY)
-            .arg("/v")
-            .arg(VALUE_NAME)
-            .arg("/f")
+        let output = reg(["delete", RUN_KEY, "/v", VALUE_NAME, "/f"])
             .output()
             .context("run reg.exe to remove auto-start")?;
         if !output.status.success() {
