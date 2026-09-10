@@ -56,7 +56,9 @@ fn tab_bar(app: &TokenMonitorApp, cx: &Context<TokenMonitorApp>) -> impl IntoEle
     let p = crate::ui::palette(cx);
     let weak = app.weak_self.clone();
     let track = cx.theme().tokens.tab_bar_segmented;
-    let selected_bg = p.background;
+    // The selected pill must sit *above* the track; using the panel background
+    // here made it darker than the track it is drawn on.
+    let selected_bg = p.selected;
     let selected_fg = p.foreground;
     let unselected_fg = p.muted_foreground;
 

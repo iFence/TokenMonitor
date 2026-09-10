@@ -51,6 +51,20 @@ pub(crate) fn hsla_from_hex(hex: u32) -> Hsla {
     Hsla { h, s, l, a: 1.0 }
 }
 
+/// The one surface color every "selected / highlighted" control uses:
+/// time-range tab pill, top-bar nav icon, settings sidebar item, dropdown row.
+///
+/// gpui-component's dark theme paints those from near-black tokens (#212121 /
+/// #262626). Against our lifted slate panels that reads as *less* prominent
+/// than an idle surface, so selection looks like a black hole. This slate is a
+/// clear step above `border` (#343a44) to keep selection obvious.
+pub(crate) const SELECTED_SURFACE_HEX: u32 = 0x3d4653;
+
+/// [`SELECTED_SURFACE_HEX`] as an `Hsla`.
+pub(crate) fn selected_surface() -> Hsla {
+    hsla_from_hex(SELECTED_SURFACE_HEX)
+}
+
 /// Copied theme colors used by the pages, avoiding long-lived `cx` borrows.
 pub(crate) struct Palette {
     pub background: Hsla,
@@ -62,6 +76,8 @@ pub(crate) struct Palette {
     pub muted_foreground: Hsla,
     /// Card-level surface, one step lighter than `background`.
     pub card: Hsla,
+    /// Surface behind a selected item (see [`SELECTED_SURFACE_HEX`]).
+    pub selected: Hsla,
     pub radius: Pixels,
 }
 
@@ -74,6 +90,7 @@ pub(crate) fn palette(cx: &App) -> Palette {
         muted: theme.muted,
         muted_foreground: theme.muted_foreground,
         card: theme.secondary,
+        selected: selected_surface(),
         radius: theme.radius,
     }
 }
@@ -167,5 +184,19 @@ mod tests {
         // GitHub dark green #0e4429 is hue ~150 degrees => ~0.417 normalized.
         let github_green = hsla_from_hex(0x0e4429);
         assert!((github_green.h - 150.0 / 360.0).abs() < 1e-3);
+    }
+
+    /// The selected surface must sit above every surface it is drawn on: the
+    /// bug was a "selected" pill that was darker than its own track/panel.
+    #[test]
+    fn selected_surface_is_lighter_than_the_panel_surfaces() {
+        let selected = selected_surface();
+        for surface in [0x1b1e24, 0x262b33, 0x2a2f38, 0x343a44] {
+            assert!(
+                selected.l > hsla_from_hex(surface).l,
+                "selected {:#x} must be lighter than surface {surface:#x}",
+                SELECTED_SURFACE_HEX
+            );
+        }
     }
 }

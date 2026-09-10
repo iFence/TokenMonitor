@@ -690,6 +690,25 @@ impl Render for TokenMonitorApp {
             theme.chart_3 = c3;
             theme.chart_4 = c4;
             theme.chart_5 = c5;
+
+            // Selected / highlighted surfaces read from these tokens: the
+            // top-bar nav icon (ghost button `selected`), the settings sidebar
+            // item, dropdown rows and checkmarked menu entries. Their dark
+            // defaults are near-black (#212121/#262626), which is darker than
+            // the panel they sit on, so a selected control looked like a black
+            // hole. Point them all at the shared lifted slate instead.
+            let selected = ui::selected_surface();
+            theme.accent = selected;
+            theme.tokens.accent = selected.into();
+            theme.sidebar_accent = selected;
+            theme.tokens.sidebar_accent = selected.into();
+            theme.secondary_active = selected;
+            theme.tokens.secondary_active = selected.into();
+            theme.list_active = selected;
+            theme.tokens.list_active = selected.into();
+            // The list/table "active" outline is drawn over the selected row;
+            // the stock dark blue belongs to no app color, so follow the accent.
+            theme.list_active_border = accent;
         }
 
         let p = crate::ui::palette(cx);
