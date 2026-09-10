@@ -150,6 +150,9 @@ pub struct TuiApp {
     skipped_update_version: Option<String>,
     /// Whether to check for updates on startup (defaults to `true`).
     check_updates_on_startup: bool,
+    /// Vertical scroll state of the 更新检查 panel (release notes can be much
+    /// taller than the terminal).
+    update_scroll: UpdateScroll,
 }
 
 impl TuiApp {
@@ -180,6 +183,7 @@ impl TuiApp {
             update_dest: None,
             skipped_update_version,
             check_updates_on_startup,
+            update_scroll: UpdateScroll::default(),
         };
         let _ = app.reload();
         // Start the cursor on the most recent day (today) instead of the
@@ -303,6 +307,38 @@ impl TuiApp {
         self.update_dest.as_deref()
     }
 
+    /// First visible content line of the 更新检查 panel.
+    pub fn update_scroll(&self) -> u16 {
+        self.update_scroll.offset as u16
+    }
+
+    /// `true` when the panel's content is taller than the lines it can show.
+    pub fn update_scrollable(&self) -> bool {
+        self.update_scroll.max() > 0
+    }
+
+    /// Report the 更新检查 panel's geometry (content lines / visible lines).
+    /// The renderer calls this every frame so key presses clamp the offset
+    /// against what is actually on screen.
+    pub fn set_update_layout(&mut self, content_lines: usize, viewport_lines: usize) {
+        self.update_scroll.relayout(content_lines, viewport_lines);
+    }
+
+    /// Scroll the update panel by `delta` lines.
+    pub fn scroll_update(&mut self, delta: isize) {
+        self.update_scroll.scroll(delta);
+    }
+
+    /// Scroll the update panel by one page, keeping one overlapping line.
+    pub fn scroll_update_page(&mut self, dir: isize) {
+        self.update_scroll.page(dir);
+    }
+
+    /// Jump the update panel to its first (`end == false`) or last line.
+    pub fn scroll_update_edge(&mut self, end: bool) {
+        self.update_scroll.jump_to_edge(end);
+    }
+
     /// Whether to run a silent update check on startup.
     pub fn check_updates_on_startup(&self) -> bool {
         self.check_updates_on_startup
@@ -315,6 +351,7 @@ impl TuiApp {
             return Ok(());
         }
         self.update = UpdateState::Checking;
+        self.update_scroll.reset();
         let current =
             Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver");
         let portable = crate::platform::is_portable();
@@ -378,6 +415,8 @@ impl TuiApp {
 
     /// Apply an update check / download result.
     pub fn handle_update_event(&mut self, event: UpdateEvent) {
+        // New content replaces the old one, so start reading from the top.
+        self.update_scroll.reset();
         match event {
             UpdateEvent::Checked { manual, result } => {
                 self.update = match result {
@@ -460,6 +499,18 @@ impl TuiApp {
     /// Handle a terminal key event. `q`/`Ctrl+C` quit, `r` rescans.
     pub fn handle_key(&mut self, key: ratatui::crossterm::event::KeyEvent) -> Result<Action> {
         use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        // In the 更新检查 panel the arrows scroll the release notes — the
+        // heatmap selection they move everywhere else is not on screen there.
+        if self.view == TuiView::Updates {
+            if let Some(action) = update_scroll_action(key.code, key.modifiers) {
+                match action {
+                    ScrollAction::Line(delta) => self.scroll_update(delta),
+                    ScrollAction::Page(dir) => self.scroll_update_page(dir),
+                    ScrollAction::Edge(end) => self.scroll_update_edge(end),
+                }
+                return Ok(Action::None);
+            }
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') if key.modifiers == KeyModifiers::NONE => {
                 return Ok(Action::Quit);
@@ -525,5 +576,205 @@ impl TuiApp {
         }
         self.selection = next;
         self.reload_hour_tokens()
+    }
+}
+
+/// How a key moves the 更新检查 panel's content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrollAction {
+    /// Move by N lines (negative = up).
+    Line(isize),
+    /// Move by one page (negative = up).
+    Page(isize),
+    /// Jump to the last line (`true`) or the first one.
+    Edge(bool),
+}
+
+/// Scrolling keys of the 更新检查 panel. Panel-independent keys (`q`, `r`,
+/// `t`, `Tab`, `u`, `d`, `s`) keep their global meaning; `j`/`k` only scroll
+/// when unmodified, matching the movement keys they replace.
+fn update_scroll_action(
+    code: ratatui::crossterm::event::KeyCode,
+    modifiers: ratatui::crossterm::event::KeyModifiers,
+) -> Option<ScrollAction> {
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    match code {
+        KeyCode::Up if modifiers == KeyModifiers::NONE => Some(ScrollAction::Line(-1)),
+        KeyCode::Down if modifiers == KeyModifiers::NONE => Some(ScrollAction::Line(1)),
+        KeyCode::Char('k') if modifiers == KeyModifiers::NONE => Some(ScrollAction::Line(-1)),
+        KeyCode::Char('j') if modifiers == KeyModifiers::NONE => Some(ScrollAction::Line(1)),
+        KeyCode::PageUp => Some(ScrollAction::Page(-1)),
+        KeyCode::PageDown => Some(ScrollAction::Page(1)),
+        KeyCode::Home => Some(ScrollAction::Edge(false)),
+        KeyCode::End => Some(ScrollAction::Edge(true)),
+        _ => None,
+    }
+}
+
+/// Vertical scroll state of the 更新检查 panel.
+///
+/// `content_lines` / `viewport_lines` are reported by the renderer (only it
+/// knows how the release notes wrapped and how tall the terminal is), so the
+/// key handlers can clamp the offset to what is actually on screen instead of
+/// drifting past either end.
+#[derive(Debug, Default, Clone, Copy)]
+struct UpdateScroll {
+    /// First visible content line.
+    offset: usize,
+    /// Total lines the panel wants to draw.
+    content_lines: usize,
+    /// Lines the panel can show at once (inside its border).
+    viewport_lines: usize,
+}
+
+impl UpdateScroll {
+    /// Largest offset that still shows content (0 when everything fits).
+    fn max(&self) -> usize {
+        self.content_lines.saturating_sub(self.viewport_lines)
+    }
+
+    /// Adopt the freshly measured geometry, keeping the view in range (e.g.
+    /// after a terminal resize made the viewport taller).
+    fn relayout(&mut self, content_lines: usize, viewport_lines: usize) {
+        self.content_lines = content_lines;
+        self.viewport_lines = viewport_lines;
+        self.offset = self.offset.min(self.max());
+    }
+
+    /// Start reading at the top (called whenever the content is replaced).
+    fn reset(&mut self) {
+        self.offset = 0;
+    }
+
+    /// Move by `delta` lines, clamped to `[0, max]`.
+    fn scroll(&mut self, delta: isize) {
+        let offset = if delta < 0 {
+            self.offset.saturating_sub(delta.unsigned_abs())
+        } else {
+            self.offset.saturating_add(delta as usize)
+        };
+        self.offset = offset.min(self.max());
+    }
+
+    /// Move by one page (a viewport minus one overlap line) in direction `dir`.
+    fn page(&mut self, dir: isize) {
+        let step = self.viewport_lines.saturating_sub(1).max(1) as isize;
+        self.scroll(dir.signum() * step);
+    }
+
+    /// Jump to the first (`end == false`) or last visible line.
+    fn jump_to_edge(&mut self, end: bool) {
+        self.offset = if end { self.max() } else { 0 };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{update_scroll_action, ScrollAction, UpdateScroll};
+    use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn update_panel_scroll_keys_map_to_scroll_actions() {
+        for (key, expected) in [
+            (KeyCode::Up, ScrollAction::Line(-1)),
+            (KeyCode::Down, ScrollAction::Line(1)),
+            (KeyCode::Char('k'), ScrollAction::Line(-1)),
+            (KeyCode::Char('j'), ScrollAction::Line(1)),
+            (KeyCode::PageUp, ScrollAction::Page(-1)),
+            (KeyCode::PageDown, ScrollAction::Page(1)),
+            (KeyCode::Home, ScrollAction::Edge(false)),
+            (KeyCode::End, ScrollAction::Edge(true)),
+        ] {
+            assert_eq!(
+                update_scroll_action(key, KeyModifiers::NONE),
+                Some(expected),
+                "{key:?}"
+            );
+        }
+
+        // Modified keys keep their global meaning, so the panel must not claim
+        // them: `Ctrl+C` still quits and `Shift+Tab` still switches panels.
+        assert_eq!(
+            update_scroll_action(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            None
+        );
+        assert_eq!(
+            update_scroll_action(KeyCode::Char('k'), KeyModifiers::SHIFT),
+            None
+        );
+        assert_eq!(
+            update_scroll_action(KeyCode::Char('u'), KeyModifiers::NONE),
+            None
+        );
+        assert_eq!(update_scroll_action(KeyCode::Tab, KeyModifiers::NONE), None);
+    }
+
+    #[test]
+    fn scroll_clamps_to_content_ends() {
+        let mut scroll = UpdateScroll::default();
+        scroll.relayout(100, 10);
+        assert_eq!(scroll.max(), 90);
+
+        // Down / up move by one line...
+        scroll.scroll(3);
+        assert_eq!(scroll.offset, 3);
+        scroll.scroll(-1);
+        assert_eq!(scroll.offset, 2);
+
+        // ...and stop at both ends instead of running off.
+        scroll.scroll(1_000);
+        assert_eq!(scroll.offset, 90);
+        scroll.scroll(-1_000);
+        assert_eq!(scroll.offset, 0);
+    }
+
+    #[test]
+    fn scroll_pages_and_edges() {
+        let mut scroll = UpdateScroll::default();
+        scroll.relayout(100, 10);
+
+        scroll.page(1);
+        assert_eq!(scroll.offset, 9);
+        scroll.page(1);
+        assert_eq!(scroll.offset, 18);
+        scroll.page(-1);
+        assert_eq!(scroll.offset, 9);
+
+        scroll.jump_to_edge(true);
+        assert_eq!(scroll.offset, 90);
+        scroll.jump_to_edge(false);
+        assert_eq!(scroll.offset, 0);
+    }
+
+    #[test]
+    fn scroll_does_nothing_when_content_fits() {
+        let mut scroll = UpdateScroll::default();
+        scroll.relayout(5, 10);
+        scroll.scroll(10);
+        scroll.page(1);
+        scroll.jump_to_edge(true);
+        assert_eq!(scroll.offset, 0);
+    }
+
+    #[test]
+    fn relayout_keeps_offset_in_range_after_resize() {
+        let mut scroll = UpdateScroll::default();
+        scroll.relayout(100, 10);
+        scroll.jump_to_edge(true);
+        assert_eq!(scroll.offset, 90);
+
+        // A taller terminal (or shorter notes) shrinks the valid range and the
+        // offset follows, so the next key press never has to "catch up".
+        scroll.relayout(100, 60);
+        assert_eq!(scroll.offset, 40);
+        scroll.relayout(20, 60);
+        assert_eq!(scroll.offset, 0);
+
+        // New content always starts at the top.
+        scroll.relayout(100, 10);
+        scroll.scroll(5);
+        scroll.reset();
+        assert_eq!(scroll.offset, 0);
     }
 }

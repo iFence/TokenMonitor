@@ -59,7 +59,7 @@ fn weekday_label(row: i64) -> Span<'static> {
 }
 
 /// Render the whole screen, dispatching on the selected panel.
-pub fn draw(frame: &mut Frame, app: &TuiApp) {
+pub fn draw(frame: &mut Frame, app: &mut TuiApp) {
     match app.view() {
         TuiView::Overview => draw_overview(frame, app),
         TuiView::TodayHourly => draw_hourly(frame, app),
@@ -203,12 +203,26 @@ fn hint_line(app: &TuiApp) -> Line<'static> {
         Span::styled("u", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled(" 更新检查", Style::default().fg(Color::Gray)),
         Span::raw("  |  "),
-        Span::styled(
-            "←→↑↓ / hjkl / Home / End",
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" 移动选中", Style::default().fg(Color::Gray)),
     ];
+    // The 更新检查 panel scrolls its release notes; the other panels move the
+    // heatmap selection with the same keys.
+    spans.extend(if app.view() == TuiView::Updates {
+        vec![
+            Span::styled(
+                "↑↓ / PgUp / PgDn / Home / End",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" 滚动更新说明", Style::default().fg(Color::Gray)),
+        ]
+    } else {
+        vec![
+            Span::styled(
+                "←→↑↓ / hjkl / Home / End",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" 移动选中", Style::default().fg(Color::Gray)),
+        ]
+    });
     if app.update_state().has_update() {
         spans.extend([
             Span::raw("  |  "),
@@ -445,7 +459,12 @@ fn draw_hourly(frame: &mut Frame, app: &TuiApp) {
 
 /// Full-screen "update check" panel: current version, available update with
 /// release notes, download / skip actions, or the last check result.
-fn draw_updates(frame: &mut Frame, app: &TuiApp) {
+///
+/// Release notes can be far taller than the terminal, so the content is drawn
+/// through a scroll offset (↑↓ / PgUp / PgDn / Home / End). The panel geometry
+/// is handed back to the app every frame so those keys clamp to what is on
+/// screen.
+fn draw_updates(frame: &mut Frame, app: &mut TuiApp) {
     let [panel, hint] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
 
@@ -549,11 +568,21 @@ fn draw_updates(frame: &mut Frame, app: &TuiApp) {
         }
     }
 
+    // Hand the measured geometry back before drawing, so key presses between
+    // frames clamp to the lines that actually fit.
+    app.set_update_layout(lines.len(), panel.height.saturating_sub(2) as usize);
+    let title = if app.update_scrollable() {
+        " 更新检查 · ↑↓ 滚动 "
+    } else {
+        " 更新检查 "
+    };
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).block(Block::bordered().title(Span::styled(
-            " 更新检查 ",
-            Style::default().add_modifier(Modifier::BOLD),
-        ))),
+        Paragraph::new(Text::from(lines))
+            .scroll((app.update_scroll(), 0))
+            .block(Block::bordered().title(Span::styled(
+                title,
+                Style::default().add_modifier(Modifier::BOLD),
+            ))),
         panel,
     );
     frame.render_widget(Paragraph::new(hint_line(app)), hint);
