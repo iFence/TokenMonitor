@@ -64,6 +64,15 @@ pub fn apply_dark_titlebar() {}
 /// uniform across platforms.
 pub fn close_window() {}
 
+/// Single-instance startup is not implemented outside Windows yet; return
+/// `true` so startup always continues.
+pub fn acquire_single_instance() -> bool {
+    true
+}
+
+/// No cross-process activation channel outside Windows; nothing to notify.
+pub fn activate_running_instance() {}
+
 /// Path of the XDG autostart `.desktop` entry, if a home directory is known.
 fn autostart_desktop_path() -> Option<PathBuf> {
     Some(

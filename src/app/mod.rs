@@ -19,6 +19,13 @@ use gpui_component::Root;
 
 /// GPUI bootstrap: init components, open the main window, run the app.
 pub fn run() -> anyhow::Result<()> {
+    // Single-instance: a second launch (double-clicked shortcut, auto-start
+    // entry, taskbar pin) hands off to the copy that is already running and
+    // exits, so there is only ever one window and one tray icon.
+    if !crate::platform::acquire_single_instance() {
+        crate::platform::activate_running_instance();
+        return Ok(());
+    }
     let application = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     application.run(move |cx: &mut App| {
         gpui_component::init(cx);

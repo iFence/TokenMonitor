@@ -33,6 +33,15 @@ pub fn apply_dark_titlebar() {}
 /// No system tray yet on macOS; no-op to keep the surface uniform.
 pub fn close_window() {}
 
+/// Single-instance startup is not implemented outside Windows yet; return
+/// `true` so startup always continues.
+pub fn acquire_single_instance() -> bool {
+    true
+}
+
+/// No cross-process activation channel outside Windows; nothing to notify.
+pub fn activate_running_instance() {}
+
 /// Path of the LaunchAgent plist, if a home directory is known.
 fn launch_agent_plist_path() -> Option<PathBuf> {
     Some(
